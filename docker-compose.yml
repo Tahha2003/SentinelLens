@@ -1,0 +1,20 @@
+services:
+  sentinellens:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - db_data:/app/sentinellens.db
+    environment:
+      - DASHBOARD_USER=admin
+      - DASHBOARD_PASSWORD=changeme
+      - FLASK_SECRET_KEY=docker-secret-change-in-prod
+      - BOTS_DATA_PATH=data/bots_sample_events.json
+      - MODEL_PATH=models/scorer_v1.joblib
+      - CORRELATION_WINDOW_MINUTES=15
+      - MIN_CLUSTER_SIZE=2
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+volumes:
+  db_data:

@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Incident {{ incident.incident_id[:8] }}... — SentinelLens{% endblock %}
+
+{% block content %}
+
+<div style="margin-bottom:16px;">
+  <a href="/dashboard" style="color:var(--muted);font-size:13px;">← Back to Dashboard</a>
+</div>
+
+<!-- Header -->
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <div>
+    <h1>
+      Incident
+      <span class="badge badge-{{ incident.confidence_band|lower }}" style="font-size:14px;margin-left:8px;">{{ incident.confidence_band }}</span>
+      {% if incident.is_truncated %}<span class="truncated-badge">TRUNCATED</span>{% endif %}
+    </h1>
+    <p style="font-family:monospace;font-size:12px;margin-top:4px;">{{ incident.incident_id }}</p>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:32px;font-weight:700;color:{% if incident.confidence_band == 'HIGH' %}var(--high){% elif incident.confidence_band == 'MEDIUM' %}var(--medium){% else %}var(--low){% endif %};">
+      {{ "%.3f"|format(incident.score) }}
+    </div>
+    <div style="font-size:11px;color:var(--muted);">MODEL SCORE</div>
+  </div>
+</div>
+
+<!-- Stats row -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">Events</div>
+    <div class="stat-value">{{ events|length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Entities</div>
+    <div class="stat-value">{{ incident.entities|length if incident.entities else 0 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Severity Max</div>
+    <div class="stat-value" style="color:{% if incident.features.severity_max == 5 %}var(--high){% elif incident.features.severity_max >= 3 %}var(--medium){% else %}var(--low){% endif %};">
+      {{ incident.features.severity_max if incident.features else '—' }}
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Duration</div>
+    <div class="stat-value" style="font-size:18px;">
+      {% if incident.features %}
+        {% set m = incident.features.time_span_minutes %}
+        {% if m < 1 %}{{ (m * 60)|int }}s{% else %}{{ m|int }}m{% endif %}
+      {% else %}—{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Two-column layout -->
+<div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start;">
+
+  <!-- Left: timeline -->
+  <div>
+    <div class="card">
+      <div class="card-header">
+        Event Timeline
+        <span style="font-size:12px;color:var(--muted);font-weight:400;">{{ events|length }} events · {{ incident.time_start[:19] if incident.time_start else '' }} → {{ incident.time_end[:19] if incident.time_end else '' }}</span>
+      </div>
+      <div class="card-body">
+        {% if events %}
+        <div class="timeline">
+          {% for ev in events %}
+          <div class="timeline-item">
+            <div class="timeline-dot" style="background:{% if ev.severity == 5 %}var(--high){% elif ev.severity == 4 %}var(--high){% elif ev.severity == 3 %}var(--medium){% else %}var(--low){% endif %};"></div>
+            <div class="timeline-content">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="font-weight:600;font-size:13px;">{{ ev.event_type }}</span>
+                <span class="timeline-time">{{ ev.timestamp[:19] if ev.timestamp else '' }}</span>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <span class="badge badge-{{ 'high' if ev.severity >= 4 else ('medium' if ev.severity == 3 else 'low') }}">sev {{ ev.severity }}</span>
+                <span class="badge badge-info">{{ ev.entity_id }}</span>
+                <span style="font-size:11px;color:var(--muted);">{{ ev.source }}</span>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p style="color:var(--muted);text-align:center;padding:24px;">No events found for this incident.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: features + entities + investigation -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+
+    <!-- Features -->
+    {% if incident.features %}
+    <div class="card">
+      <div class="card-header">Feature Vector</div>
+      <div class="card-body" style="padding:0;">
+        <table>
+          {% for key, val in incident.features.items() %}
+          <tr>
+            <td style="color:var(--muted);font-size:12px;font-family:monospace;">{{ key }}</td>
+            <td style="font-variant-numeric:tabular-nums;font-size:13px;text-align:right;">
+              {% if val is none %}—{% elif val is float %}{{ "%.3f"|format(val) }}{% else %}{{ val }}{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Entities -->
+    {% if incident.entities %}
+    <div class="card">
+      <div class="card-header">Entities ({{ incident.entities|length }})</div>
+      <div class="card-body" style="display:flex;flex-wrap:wrap;gap:6px;">
+        {% for entity in incident.entities %}
+        <span class="badge badge-info">{{ entity }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Investigation Panel -->
+    <div class="card">
+      <div class="card-header">🤖 Investigate</div>
+      <div class="card-body">
+        <div class="chat-panel">
+          <div id="chat-messages" style="display:flex;flex-direction:column;gap:8px;min-height:40px;"></div>
+          <div class="chat-input-row">
+            <input type="text" id="query-input" placeholder="Ask about this incident…" />
+            <button class="btn btn-primary" onclick="submitQuery()">Ask</button>
+          </div>
+          <p style="font-size:11px;color:var(--muted);">Examples: "What else did this user do?" · "Show failed logins" · "Explain this incident"</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const INCIDENT_ID = "{{ incident.incident_id }}";
+const AUTH = "Basic " + btoa("{{ dashboard_user }}:{{ dashboard_password }}");
+
+function submitQuery() {
+  const input = document.getElementById("query-input");
+  const query = input.value.trim();
+  if (!query) return;
+  input.value = "";
+
+  const messages = document.getElementById("chat-messages");
+
+  // User message
+  const userMsg = document.createElement("div");
+  userMsg.className = "chat-message";
+  userMsg.innerHTML = `<div class="label">You</div>${escHtml(query)}`;
+  messages.appendChild(userMsg);
+
+  // Thinking
+  const thinkMsg = document.createElement("div");
+  thinkMsg.className = "chat-message";
+  thinkMsg.id = "thinking";
+  thinkMsg.innerHTML = `<div class="label">Agent</div><span style="color:var(--muted)">Thinking…</span>`;
+  messages.appendChild(thinkMsg);
+  messages.scrollTop = messages.scrollHeight;
+
+  fetch("/api/v1/investigate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": AUTH },
+    body: JSON.stringify({ incident_id: INCIDENT_ID, query: query })
+  })
+  .then(r => r.json())
+  .then(data => {
+    const sessionId = data.session_id;
+    if (!sessionId) throw new Error(data.error || "No session ID returned");
+    pollResult(sessionId);
+  })
+  .catch(err => {
+    document.getElementById("thinking").innerHTML =
+      `<div class="label" style="color:var(--high)">Error</div>${escHtml(String(err))}`;
+  });
+}
+
+function pollResult(sessionId, attempts=0) {
+  if (attempts > 30) {
+    document.getElementById("thinking").innerHTML =
+      `<div class="label" style="color:var(--high)">Timeout</div>Investigation timed out.`;
+    return;
+  }
+  fetch(`/api/v1/investigate/${sessionId}`, { headers: { "Authorization": AUTH } })
+  .then(r => r.json())
+  .then(data => {
+    if (data.status === "complete" || data.status === "failed") {
+      const el = document.getElementById("thinking");
+      el.id = "";
+      let html = `<div class="label">Agent <span style="font-size:10px;color:var(--muted);">(${data.agent_backend || ""})</span></div>`;
+      html += `<div style="white-space:pre-wrap;">${escHtml(data.result_summary || data.error_message || "No response")}</div>`;
+      if (data.spl_generated) {
+        html += `<div class="chat-spl">${escHtml(data.spl_generated)}</div>`;
+      }
+      el.innerHTML = html;
+      el.scrollIntoView({ behavior: "smooth" });
+    } else {
+      setTimeout(() => pollResult(sessionId, attempts + 1), 1000);
+    }
+  });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+document.getElementById("query-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") submitQuery();
+});
+</script>
+{% endblock %}
