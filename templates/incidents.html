@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Incidents — SentinelLens{% endblock %}
+
+{% block content %}
+
+{% if datasource_mode == 'local_bots' %}
+<div class="alert alert-offline">
+  📡 <strong>OFFLINE / DEMO MODE</strong> — Running on local BOTS sample data. Set <code>SPLUNK_HOST</code> and <code>SPLUNK_TOKEN</code> in <code>.env</code> to connect to live Splunk.
+</div>
+{% else %}
+<div class="alert alert-success">
+  ✅ Connected to Splunk Live (<code>{{ datasource_mode }}</code>)
+</div>
+{% endif %}
+
+<div class="page-header">
+  <h1>Incident Dashboard</h1>
+  <p>{{ total }} incident{% if total != 1 %}s{% endif %} scored — ranked by model confidence</p>
+</div>
+
+<!-- Stats row -->
+<div class="stat-grid">
+  {% set high_count   = incidents | selectattr('confidence_band','eq','HIGH')   | list | length %}
+  {% set medium_count = incidents | selectattr('confidence_band','eq','MEDIUM') | list | length %}
+  {% set low_count    = incidents | selectattr('confidence_band','eq','LOW')    | list | length %}
+  <div class="stat-card">
+    <div class="stat-label">Total</div>
+    <div class="stat-value">{{ total }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label" style="color:var(--high)">High</div>
+    <div class="stat-value" style="color:var(--high)">{{ high_count }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label" style="color:var(--medium)">Medium</div>
+    <div class="stat-value" style="color:var(--medium)">{{ medium_count }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label" style="color:var(--low)">Low</div>
+    <div class="stat-value" style="color:var(--low)">{{ low_count }}</div>
+  </div>
+</div>
+
+<!-- Pipeline trigger -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body" style="display:flex;align-items:center;gap:12px;">
+    <button class="btn btn-primary"
+      hx-post="/api/v1/pipeline/run"
+      hx-target="#pipeline-status"
+      hx-swap="innerHTML"
+      hx-headers='{"Authorization": "Basic YWRtaW46Y2hhbmdlbWU="}'>
+      ▶ Run Pipeline
+    </button>
+    <div id="pipeline-status" style="font-size:13px;color:var(--muted);">
+      {% if recent_runs %}
+        Last run: <strong>{{ recent_runs[0].status }}</strong>
+        {% if recent_runs[0].cluster_count is not none %}
+          — {{ recent_runs[0].cluster_count }} clusters
+        {% endif %}
+      {% else %}
+        No pipeline runs yet.
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Incidents table -->
+<div class="card">
+  <div class="card-header">
+    <span>Incidents</span>
+    <span style="font-size:12px;color:var(--muted);font-weight:400;">Sorted by score ↓</span>
+  </div>
+
+  {% if incidents %}
+  <table>
+    <thead>
+      <tr>
+        <th>Score</th>
+        <th>Band</th>
+        <th>Events</th>
+        <th>Entities</th>
+        <th>Severity Max</th>
+        <th>Start</th>
+        <th>Duration</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inc in incidents %}
+      <tr>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ "%.2f"|format(inc.score) }}</span>
+            <div class="score-bar">
+              <div class="score-bar-fill" style="width:{{ (inc.score * 100)|int }}%;
+                background:{% if inc.confidence_band == 'HIGH' %}var(--high){% elif inc.confidence_band == 'MEDIUM' %}var(--medium){% else %}var(--low){% endif %};"></div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span class="badge badge-{{ inc.confidence_band|lower }}">{{ inc.confidence_band }}</span>
+          {% if inc.is_truncated %}<span class="truncated-badge">TRUNCATED</span>{% endif %}
+        </td>
+        <td>{{ inc.event_count }}</td>
+        <td>
+          {% if inc.entities %}
+            {% for e in inc.entities[:3] %}
+              <span style="font-size:11px;color:var(--muted);">{{ e }}</span>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+            {% if inc.entities|length > 3 %}
+              <span style="font-size:11px;color:var(--muted);">+{{ inc.entities|length - 3 }} more</span>
+            {% endif %}
+          {% endif %}
+        </td>
+        <td>
+          <span style="color:{% if inc.severity_max == 5 %}var(--high){% elif inc.severity_max >= 4 %}var(--high){% elif inc.severity_max == 3 %}var(--medium){% else %}var(--low){% endif %};">
+            {{ inc.severity_max }}
+          </span>
+        </td>
+        <td style="color:var(--muted);font-size:12px;">{{ inc.time_start[:19] if inc.time_start else '—' }}</td>
+        <td style="color:var(--muted);font-size:12px;">
+          {% set mins = inc.time_span_minutes %}
+          {% if mins is not none %}
+            {% if mins < 1 %}{{ (mins * 60)|int }}s{% else %}{{ mins|int }}m{% endif %}
+          {% endif %}
+        </td>
+        <td>
+          <a href="/incidents/{{ inc.incident_id }}" class="btn" style="padding:4px 10px;font-size:12px;">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body" style="text-align:center;padding:48px;color:var(--muted);">
+    <p style="font-size:16px;margin-bottom:8px;">No incidents yet.</p>
+    <p>Click <strong>Run Pipeline</strong> to process the sample data.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

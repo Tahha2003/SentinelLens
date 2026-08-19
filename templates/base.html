@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}SentinelLens{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --high: #f85149;
+      --medium: #e3b341;
+      --low: #3fb950;
+      --info: #79c0ff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .navbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 52px; gap: 16px; }
+    .navbar-brand { font-weight: 700; font-size: 16px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .navbar-brand::before { content: "🔍"; }
+    .navbar-nav { display: flex; gap: 4px; margin-left: auto; }
+    .navbar-nav a { color: var(--muted); padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+    .navbar-nav a:hover { background: var(--border); color: var(--text); text-decoration: none; }
+
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-high    { background: rgba(248,81,73,.15); color: var(--high); border: 1px solid rgba(248,81,73,.3); }
+    .badge-medium  { background: rgba(227,179,65,.15); color: var(--medium); border: 1px solid rgba(227,179,65,.3); }
+    .badge-low     { background: rgba(63,185,80,.15); color: var(--low); border: 1px solid rgba(63,185,80,.3); }
+    .badge-info    { background: rgba(121,192,255,.15); color: var(--info); border: 1px solid rgba(121,192,255,.3); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h1 { font-size: 20px; font-weight: 600; }
+    .page-header p  { color: var(--muted); margin-top: 4px; font-size: 13px; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .card-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+    .card-body   { padding: 16px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); border-bottom: 1px solid var(--border); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+
+    .score-bar { position: relative; height: 4px; background: var(--border); border-radius: 2px; width: 80px; }
+    .score-bar-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 2px; background: var(--accent); }
+
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 500; transition: background .15s; }
+    .btn:hover { background: var(--border); text-decoration: none; }
+    .btn-primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+    .btn-primary:hover { background: #79c0ff; }
+
+    .alert { padding: 12px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; }
+    .alert-offline { background: rgba(227,179,65,.1); border: 1px solid rgba(227,179,65,.3); color: var(--medium); }
+    .alert-success { background: rgba(63,185,80,.1); border: 1px solid rgba(63,185,80,.3); color: var(--low); }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat-card  { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 6px; }
+    .stat-value { font-size: 24px; font-weight: 700; }
+
+    #pipeline-status { min-height: 20px; }
+
+    .timeline { position: relative; padding-left: 20px; }
+    .timeline::before { content:''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+    .timeline-item { position: relative; margin-bottom: 12px; }
+    .timeline-dot { position: absolute; left: -17px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
+    .timeline-content { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+    .timeline-time { font-size: 11px; color: var(--muted); }
+
+    .chat-panel { display: flex; flex-direction: column; gap: 12px; }
+    .chat-input-row { display: flex; gap: 8px; }
+    .chat-input-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px; }
+    .chat-message { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+    .chat-message .label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .chat-spl { font-family: monospace; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 4px; margin-top: 8px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--info); }
+
+    .truncated-badge { font-size: 10px; background: rgba(227,179,65,.15); color: var(--medium); border: 1px solid rgba(227,179,65,.3); padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/dashboard" class="navbar-brand">SentinelLens</a>
+    <div class="navbar-nav">
+      <a href="/dashboard">Incidents</a>
+      <a href="/api/v1/health">Health</a>
+      <a href="/api/v1/model/report">Model</a>
+    </div>
+  </nav>
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>
