@@ -293,18 +293,6 @@ make clean       # Remove cache, DB, coverage files
 | API documentation (OpenAPI) | ✅ | `docs/openapi.json` |
 | Evaluation report (precision/recall/F1) | ✅ | `eval/scorer_report.md` |
 | Agent evaluation (manual scoring) | ✅ | `eval/agent_eval.md` |
-| Demo video (<3 min) | ⏳ | Pending — see script below |
-
-### Demo Video Script
-
-1. `make demo` → dashboard loads at localhost:5000
-2. Show **"Connected to Splunk Live"** banner
-3. Click **Run Pipeline** → show "Running…" → wait ~2 min → 18 incidents
-4. Scroll the incident list — score bars, HIGH badges, BOTS hostnames
-5. Click **View →** on `host:frothly-fw1` → 169-event timeline, Cisco ASA logs
-6. Scroll to **Investigate** → type `"Show network connections"` → generated SPL
-7. Type `"Show failed logins"` → `EventCode=4625` SPL with entity + time range
-8. Back to dashboard → click Health — show datasource, model, DB status
 
 ---
 
