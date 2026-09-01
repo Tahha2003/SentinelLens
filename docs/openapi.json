@@ -1,0 +1,418 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SentinelLens API",
+    "description": "Incident triage copilot for Splunk. Clusters security events into incidents using entity-centric temporal correlation, scores them with a trained ML model, and provides a natural-language investigation interface.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "SentinelLens",
+      "url": "https://github.com/Tahha2003/SentinelLens"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Local development server"
+    }
+  ],
+  "security": [
+    {
+      "basicAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "HTTP Basic Auth. Default: admin / admin123"
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok", "degraded"],
+            "example": "ok"
+          },
+          "datasource": {
+            "type": "object",
+            "properties": {
+              "mode": { "type": "string", "example": "splunk_live" },
+              "healthy": { "type": "boolean", "example": true }
+            }
+          },
+          "database": { "type": "boolean", "example": true },
+          "scorer_loaded": { "type": "boolean", "example": true },
+          "active_model": { "type": "string", "example": "98ca94b48b19..." },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Incident": {
+        "type": "object",
+        "properties": {
+          "incident_id": { "type": "string", "format": "uuid" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1, "example": 0.9997 },
+          "confidence_band": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+          "event_count": { "type": "integer", "example": 169 },
+          "entity_count": { "type": "integer", "example": 1 },
+          "time_start": { "type": "string", "format": "date-time" },
+          "time_end": { "type": "string", "format": "date-time" },
+          "duration_minutes": { "type": "number", "example": 0.7 },
+          "top_entities": {
+            "type": "array",
+            "items": { "type": "string" },
+            "example": ["host:frothly-fw1"]
+          },
+          "severity_max": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "is_truncated": { "type": "boolean" },
+          "model_version": { "type": "string" }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "event_id": { "type": "string", "format": "uuid" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "entity_id": { "type": "string", "example": "host:frothly-fw1" },
+          "entity_type": { "type": "string", "enum": ["USER", "HOST", "IP", "PROCESS", "URL", "UNKNOWN"] },
+          "event_type": { "type": "string", "example": "network_traffic" },
+          "severity": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "source": { "type": "string", "example": "splunk_live:cisco:asa" },
+          "raw_fields": { "type": "object" },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "IncidentFeatures": {
+        "type": "object",
+        "properties": {
+          "event_count": { "type": "integer" },
+          "event_type_entropy": { "type": "number" },
+          "severity_sum": { "type": "integer" },
+          "severity_max": { "type": "integer" },
+          "entity_fan_out": { "type": "integer" },
+          "time_density": { "type": "number" },
+          "time_span_minutes": { "type": "number" },
+          "unique_sources": { "type": "integer" },
+          "perf_deviation_max": { "type": "number", "nullable": true }
+        }
+      },
+      "PipelineRun": {
+        "type": "object",
+        "properties": {
+          "run_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["queued", "running", "complete", "failed"] },
+          "datasource_mode": { "type": "string", "enum": ["local_bots", "splunk_live"] },
+          "event_count": { "type": "integer", "nullable": true },
+          "normalized_count": { "type": "integer", "nullable": true },
+          "cluster_count": { "type": "integer", "nullable": true },
+          "normalization_failures": { "type": "integer" },
+          "error_message": { "type": "string", "nullable": true },
+          "started_at": { "type": "string", "format": "date-time" },
+          "completed_at": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "InvestigationSession": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string", "format": "uuid" },
+          "incident_id": { "type": "string", "format": "uuid" },
+          "status": { "type": "string", "enum": ["queued", "running", "complete", "failed"] },
+          "analyst_query": { "type": "string", "example": "Show network connections" },
+          "spl_generated": { "type": "string", "nullable": true, "example": "index=botsv3 host=\"frothly-fw1\" | stats count by sourcetype" },
+          "result_summary": { "type": "string", "nullable": true },
+          "agent_backend": { "type": "string", "enum": ["mcp_server", "splunk_sdk", "local_mock"], "nullable": true }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "total": { "type": "integer" },
+          "pages": { "type": "integer" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "System health check",
+        "description": "Returns datasource status, scorer status, and DB reachability.",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Health status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/incidents": {
+      "get": {
+        "tags": ["Incidents"],
+        "summary": "List scored incidents",
+        "description": "Returns a paginated list of incidents sorted by score descending.",
+        "operationId": "listIncidents",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } },
+          { "name": "min_score", "in": "query", "schema": { "type": "number", "default": 0.0 } },
+          { "name": "band", "in": "query", "schema": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated incident list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Incident" } },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" },
+                    "datasource_mode": { "type": "string" },
+                    "generated_at": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}": {
+      "get": {
+        "tags": ["Incidents"],
+        "summary": "Get incident detail",
+        "operationId": "getIncident",
+        "parameters": [
+          { "name": "incident_id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full incident with cluster detail",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Incident" } } }
+          },
+          "404": { "description": "Incident not found" }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}/timeline": {
+      "get": {
+        "tags": ["Incidents"],
+        "summary": "Get event timeline for incident",
+        "operationId": "getTimeline",
+        "parameters": [
+          { "name": "incident_id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events sorted by timestamp ascending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "incident_id": { "type": "string" },
+                    "events": { "type": "array", "items": { "$ref": "#/components/schemas/Event" } },
+                    "count": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Incident not found" }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}/features": {
+      "get": {
+        "tags": ["Incidents"],
+        "summary": "Get feature vector for incident (explainability)",
+        "operationId": "getFeatures",
+        "parameters": [
+          { "name": "incident_id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "9-feature vector used by the ML model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "incident_id": { "type": "string" },
+                    "features": { "$ref": "#/components/schemas/IncidentFeatures" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Incident not found" }
+        }
+      }
+    },
+    "/api/v1/model/report": {
+      "get": {
+        "tags": ["Model"],
+        "summary": "Active model evaluation report",
+        "description": "Returns precision, recall, F1, confusion matrix for the active scorer model.",
+        "operationId": "getModelReport",
+        "responses": {
+          "200": { "description": "Model metrics from model_registry" },
+          "503": { "description": "No trained model found — run eval/train.py" }
+        }
+      }
+    },
+    "/api/v1/pipeline/run": {
+      "post": {
+        "tags": ["Pipeline"],
+        "summary": "Trigger a pipeline run",
+        "description": "Starts an async pipeline run. Returns run_id immediately. Poll /pipeline/status/{run_id} for completion.",
+        "operationId": "runPipeline",
+        "responses": {
+          "202": {
+            "description": "Pipeline queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run_id": { "type": "string", "format": "uuid" },
+                    "status": { "type": "string", "example": "queued" }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "description": "Scorer model not loaded — run eval/train.py" }
+        }
+      }
+    },
+    "/api/v1/pipeline/status/{run_id}": {
+      "get": {
+        "tags": ["Pipeline"],
+        "summary": "Poll pipeline run status",
+        "operationId": "getPipelineStatus",
+        "parameters": [
+          { "name": "run_id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pipeline run status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PipelineRun" } } }
+          },
+          "404": { "description": "Run not found" }
+        }
+      }
+    },
+    "/api/v1/datasource/status": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Active datasource mode",
+        "operationId": "getDatasourceStatus",
+        "responses": {
+          "200": {
+            "description": "Datasource status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": { "type": "string", "enum": ["local_bots", "splunk_live"] },
+                    "healthy": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investigate": {
+      "post": {
+        "tags": ["Investigation"],
+        "summary": "Submit natural-language investigation query",
+        "description": "Translates a natural-language question into SPL, executes it, and returns a summary. Uses MCPServerAgent → SplunkSDKAgent → local_mock fallback chain.",
+        "operationId": "startInvestigation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["incident_id", "query"],
+                "properties": {
+                  "incident_id": { "type": "string", "format": "uuid" },
+                  "query": { "type": "string", "example": "Show network connections for this host" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Investigation queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session_id": { "type": "string", "format": "uuid" },
+                    "status": { "type": "string", "example": "queued" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing incident_id or query" },
+          "404": { "description": "Incident not found" }
+        }
+      }
+    },
+    "/api/v1/investigate/{session_id}": {
+      "get": {
+        "tags": ["Investigation"],
+        "summary": "Poll investigation result",
+        "operationId": "getInvestigation",
+        "parameters": [
+          { "name": "session_id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigation session with result",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvestigationSession" } } }
+          },
+          "404": { "description": "Session not found" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "System", "description": "Health, datasource status" },
+    { "name": "Incidents", "description": "Scored incidents, timeline, features" },
+    { "name": "Pipeline", "description": "Trigger and monitor pipeline runs" },
+    { "name": "Model", "description": "ML model evaluation report" },
+    { "name": "Investigation", "description": "Natural-language incident investigation" }
+  ]
+}

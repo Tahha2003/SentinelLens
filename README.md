@@ -1,300 +1,141 @@
 # SentinelLens
 
-An open-source incident triage copilot for Splunk. Clusters related security events into incidents using entity-centric temporal correlation, scores each incident with a trained ML model, and surfaces them in a ranked dashboard with drill-down timelines.
+> An open-source incident triage copilot for Splunk — built for the **Splunk Agentic Ops Hackathon, Security Track**.
 
-Built for the **Splunk Agentic Ops Hackathon** — Security Track.
+SentinelLens clusters raw security events into incident-level groupings using entity-centric temporal correlation, scores each incident with a trained ML model, and lets analysts investigate incidents through a natural-language interface with auto-generated SPL queries.
 
 ---
 
 ## Build Status
 
-| Phase | Status | Summary |
-|-------|--------|---------|
-| **Phase 0 — Local Pipeline** | ✅ **COMPLETE** | Full local pipeline running — no Splunk required |
-| **Phase 1 — Splunk Integration** | ⏳ **PENDING** | Code written, live Splunk connection remaining |
-| **Phase 2 — Investigation Agent** | ⏳ **PENDING** | Scaffold ready, MCP Server integration remaining |
-| **Phase 3 — Polish & Submission** | ⏳ **PENDING** | Architecture diagram, demo video, OpenAPI spec |
+| Phase | Status | Description |
+|-------|--------|-------------|
+| **Phase 0 — Local Pipeline** | ✅ **Complete** | Full pipeline on synthetic BOTS data — no Splunk required |
+| **Phase 1 — Splunk Integration** | ✅ **Complete** | Live Splunk connection, real BOTS v3 data, 18 incidents |
+| **Phase 2 — Investigation Agent** | ✅ **Complete** | NL → SPL generation, incident-specific queries, mock fallback |
+| **Phase 3 — Submission Polish** | ✅ **Complete** | Architecture diagram, OpenAPI spec, agent eval, this README |
 
 ---
 
-## Quick Start (Local Demo — no Splunk required)
+## Quick Start
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/Tahha2003/SentinelLens.git
 cd SentinelLens
 
-# 1. Install dependencies
 pip install -r requirements.txt
-
-# 2. Copy config
 copy .env.example .env
 
-# 3. Train the scoring model
 python eval/train.py
 
-# 4. Start the dashboard
 flask --app sentinellens.api.app run --host=0.0.0.0 --port=5000
 ```
 
-Open **http://localhost:5000** — login with `admin` / `admin123`.
+Open **http://localhost:5000** — login: `admin` / `admin123`
 
-Click **Run Pipeline** to process the sample data. 61 incidents will appear ranked by score.
+Click **Run Pipeline** → incidents appear ranked by model score.
+
+> Full Splunk setup: see [SETUP.md](SETUP.md)
 
 ---
 
-## Phase 0 — What Was Built ✅
+## What It Does
 
-### 1. Project Scaffold
-- Python 3.11 project structure
-- `requirements.txt` with pinned versions
-- `.env.example` — credentials placeholder, no secrets committed
-- `Makefile` — `make demo`, `make test`, `make eval`, `make docker-up`
-- `Dockerfile` + `docker-compose.yml`
+### Problem
+Organizations running base-tier Splunk Enterprise/Cloud (without the premium ES SKU) have no agentic triage capability. Analysts manually cross-reference events across multiple ad-hoc searches to determine whether a set of alerts represents one incident, multiple incidents, or noise — for every alert, every shift.
 
-### 2. Data Contracts (`sentinellens/models.py`)
-All dataclasses defined (frozen where appropriate):
-- `Event` — normalized security event (UUID4, UTC timestamp, entity_id, severity 1-5)
-- `EntityType` — enum: USER, HOST, IP, PROCESS, URL, UNKNOWN
-- `MetricPoint` — performance metrics (optional Phase 1 feature)
-- `IncidentFeatures` — 9-feature vector (frozen order — ML contract)
-- `IncidentCluster` — correlated events group
-- `ScoredIncident` — cluster + ML score + confidence band
-- `InvestigationResult` — Phase 2 agent response
+### Solution
+SentinelLens provides three capabilities on top of standard Splunk:
 
-### 3. Configuration (`sentinellens/config.py`)
-- `.env` file loader via `python-dotenv`
-- Validation at startup — missing required vars produce a clear error message
-- `IS_LOCAL_MODE` flag — auto-detected from environment variables
+1. **Incident Clustering** — Groups related events into entity-centric incident clusters using a sliding-window graph algorithm (NetworkX connected components)
+2. **ML Scoring** — Scores each cluster with a trained Logistic Regression model, ranked by probability of being a real incident
+3. **NL Investigation** — Analyst types a question in plain English, SentinelLens generates incident-specific SPL and (when Splunk MCP Server is available) executes and summarizes the results
 
-### 4. Database Layer (`sentinellens/db/`)
-**schema.sql** — complete SQLite DDL (7 tables):
-- `pipeline_runs` — audit trail for every pipeline execution
-- `events` — normalized events (written once, never updated)
-- `incident_clusters` — correlation engine output
-- `cluster_events` — many-to-many join table
-- `scored_incidents` — ML scores per cluster
-- `investigation_sessions` — Phase 2 chat history
-- `model_registry` — trained model version tracking
+---
 
-**repository.py** — all database operations:
-- All queries parameterized — zero SQL string concatenation
-- `PRAGMA foreign_keys=ON` applied per-connection (SQLite requirement)
-- WAL mode — concurrent reads while pipeline writes
-- Retry logic (3 attempts, 100ms backoff) for DB lock errors
-- Cascade deletes — no orphan rows possible
-
-### 5. DataSource Layer (`sentinellens/datasource/`)
-Critical architecture isolation boundary:
-
-```
-DataSource (ABC)
-├── LocalFileDataSource   ← BOTS JSON/CSV reads  ✅
-├── SplunkDataSource      ← Phase 1 (code ready, needs live instance)  ⏳
-└── factory.py            ← Auto-selects: Splunk if configured + healthy, else local
-```
-
-- `base.py` — `DataSource` ABC: `get_events()`, `get_metrics()`, `health_check()`, `source_name()`
-- `local.py` — JSON/CSV reading, time-window filtering, entity filtering
-- `splunk.py` — Splunk Python SDK wrapper (Phase 1 code written)
-- `factory.py` — Singleton factory, graceful fallback to local if Splunk is unreachable
-
-**Rule:** No component downstream of this boundary may import `local.py` or `splunk.py` directly. All access goes through `factory.py`. This is what makes Phase 0 a fully standalone deliverable.
-
-### 6. Pipeline (`sentinellens/pipeline/`)
-
-**normalizer.py**
-- BOTS + Splunk CIM field mapping table
-- `_time` → UTC `datetime` (epoch float and ISO8601 both supported)
-- Entity extraction with prefix normalization: `user:alice`, `host:dc01`, `ip:10.0.0.1`
-- Severity mapping: string labels and numeric (1-5 range)
-- Unknown entity fallback: `unknown:<sha8(raw)>`
-- Per-record failure logging — silent failures are tracked and counted, never swallowed
-
-**correlator.py** — Entity-Centric Sliding Window Graph Clustering:
-1. Sort events by timestamp ascending
-2. Build a NetworkX graph — one node per event
-3. Add edges between events in the same entity group within the time window
-4. Also link events that reference related entities in raw fields (transitive connectivity)
-5. `nx.connected_components()` → incident clusters
-6. Filter by `MIN_CLUSTER_SIZE`, cap at `MAX_CLUSTER_SIZE=500`
-7. High-activity entity guard: >1000 events for one entity → strict 5-minute window
-
-**features.py** — 9 features (frozen order — changing this requires retraining):
-
-| # | Feature | Description |
-|---|---------|-------------|
-| 0 | `event_count` | Total events in cluster |
-| 1 | `event_type_entropy` | Shannon entropy of event type distribution |
-| 2 | `severity_sum` | Sum of all event severities |
-| 3 | `severity_max` | Worst-case severity in cluster |
-| 4 | `entity_fan_out` | Distinct entity count (>3 signals lateral movement) |
-| 5 | `time_density` | Events per minute |
-| 6 | `time_span_minutes` | Cluster duration |
-| 7 | `unique_sources` | Cross-source correlation strength |
-| 8 | `perf_deviation_max` | Max z-score of performance metrics (optional) |
-
-**scorer.py**
-- Loads `models/scorer_v1.joblib` at startup
-- `predict_proba()` → 0.0–1.0 incident probability score
-- Confidence bands: HIGH ≥0.75, MEDIUM ≥0.50, LOW <0.50
-- Model file missing → `RuntimeError` with a clear message and fix instruction
-
-**runner.py**
-- Async pipeline (background thread) and sync mode (for scripts/CLI)
-- Full flow: DataSource → Normalizer → Correlator → Features → Scorer → Repository
-- Run status tracked in `pipeline_runs` table, pollable via API
-
-### 7. ML Training (`eval/train.py`)
-- Trains both LogisticRegression and GradientBoostingClassifier
-- `RANDOM_SEED=42`, `TEST_SPLIT=0.2`, stratified split — fully reproducible
-- Selects the algorithm with higher F1 on the held-out set
-- Saves winning model to `models/scorer_v1.joblib`
-- Writes `eval/scorer_report.md` with measured metrics
-- Registers model in `model_registry` DB table
-
-**Evaluation Results (Phase 0 — synthetic data):**
+## Live Results (BOTS v3 Dataset)
 
 | Metric | Value |
 |--------|-------|
-| Algorithm selected | Logistic Regression |
+| Events fetched from Splunk | 5,000 |
+| Normalization failures | 0 |
+| Incident clusters produced | 18 |
+| HIGH confidence incidents | 17 |
+| Top incident score | 1.000 |
+| Pipeline runtime | ~2 minutes |
+| Datasource | `index=botsv3` — Splunk Enterprise local |
+
+**Scorer evaluation (held-out test split, synthetic data):**
+
+| Metric | Value |
+|--------|-------|
+| Algorithm | Logistic Regression |
 | Precision | 1.0000 |
 | Recall | 1.0000 |
 | F1 | 1.0000 |
-| Test set size | 13 samples (stratified 80/20 split) |
-| Training dataset | 600 synthetic BOTS-style events |
+| Test set | 13 samples (80/20 stratified split, seed=42) |
 
-> Note: F1=1.0 is expected on synthetic data with clean, well-separated attack patterns. Metrics on real BOTS v3 data will be lower and will be reported honestly when available.
+> See [eval/scorer_report.md](eval/scorer_report.md) for full confusion matrix and methodology.
+> F1=1.0 reflects clean synthetic data — real BOTS v3 metrics will be lower and reported honestly.
 
-### 8. Sample Data (`data/bots_sample_events.json`)
-600 synthetic BOTS-style events — runs out of the box with no external dependencies:
-- **400 noise events** (label=0) — normal web traffic, routine logins, AWS API calls
-- **200 incident events** (label=1) — six attack scenarios:
+**Investigation agent evaluation (15 test questions, manual scoring):**
 
-| Attack Scenario | Primary Entity | Description |
-|----------------|----------------|-------------|
-| Brute Force | `wrstock` from `23.22.63.114` | 46 failed logins against `venus.buttercupgames.com` |
-| Lateral Movement | `bob` | Authenticated to dc01 → fileserver01 → appserver02 within 15 min |
-| C2 Beaconing | `workstation07` | Periodic HTTP POST to `185.220.101.45` every ~2 min over 30 min |
-| Data Exfiltration | `fileserver01` | Large TCP transfers (1–5 MB each) to `104.21.44.102` |
-| Malware Detection | `workstation07`, `workstation12` | Symantec AV alerts — CobaltStrike, WannaCry, Backdoor.Tidserv |
-| DNS Tunneling | `workstation07` | Long hex subdomain TXT queries to external resolvers |
+| Rating | Count | % |
+|--------|-------|---|
+| Correct SPL | 8 | 53% |
+| Relevant/Partial | 6 | 40% |
+| Incorrect | 1 | 7% |
 
-### 9. REST API (`sentinellens/api/`)
-All endpoints protected by HTTP Basic Auth — including `/health`:
-
-| Method | Endpoint | Phase | Description |
-|--------|----------|-------|-------------|
-| GET | `/api/v1/health` | 0 | System health — datasource, scorer, DB status |
-| GET | `/api/v1/incidents` | 0 | Paginated incident list, sorted by score DESC |
-| GET | `/api/v1/incidents/<id>` | 0 | Single incident with full cluster detail |
-| GET | `/api/v1/incidents/<id>/timeline` | 0 | All events sorted by timestamp |
-| GET | `/api/v1/incidents/<id>/features` | 0 | 9-feature vector for explainability |
-| GET | `/api/v1/model/report` | 0 | Active model metrics from model_registry |
-| POST | `/api/v1/pipeline/run` | 0 | Trigger pipeline run (async, returns run_id immediately) |
-| GET | `/api/v1/pipeline/status/<run_id>` | 0 | Poll pipeline run status |
-| GET | `/api/v1/datasource/status` | 1 | Active datasource mode (live or offline) |
-| POST | `/api/v1/investigate` | 2 | Submit NL query (returns session_id; local mock in Phase 0) |
-| GET | `/api/v1/investigate/<session_id>` | 2 | Poll investigation result |
-
-### 10. Dashboard (`templates/`)
-HTMX + Jinja2 server-rendered UI — no React, no JavaScript build step:
-
-- **Incidents List** — score bar, confidence band badge, event count, top entities, duration
-- **Pipeline Button** — triggers pipeline via HTMX, shows status inline
-- **Incident Detail** — full feature vector table, entity badges, event timeline
-- **Investigation Panel** — natural language query input, real-time result polling, SPL display
-- **OFFLINE MODE banner** — clearly shown when Splunk is not connected
-- **Dark theme** (GitHub-style color scheme)
-
-### 11. Security
-- HTTP Basic Auth on every route — no unauthenticated reads of security data
-- All SQL parameterized — zero string concatenation, enforced by `bandit`
-- `.env` in `.gitignore` — credentials are never committed
-- Splunk token is read-only (search only, no write/delete)
-- No auto-remediation — the system is fully read-only against Splunk
-
----
-
-## Phase 1 — Splunk Integration (PENDING) ⏳
-
-**What is already written:**
-- `sentinellens/datasource/splunk.py` — full `SplunkDataSource` implementation
-- `factory.py` — auto-selects Splunk when `SPLUNK_HOST` + `SPLUNK_TOKEN` are set
-- Graceful fallback: Splunk unreachable → silently switch to local mode → show "OFFLINE MODE" banner
-- `/api/v1/datasource/status` endpoint live
-
-**What remains to be done:**
-- [ ] Apply for Splunk dev license — https://dev.splunk.com (free, just admin time)
-- [ ] Connect to a live Splunk instance and run the pipeline end-to-end
-- [ ] Set `SPLUNK_HOST`, `SPLUNK_PORT`, `SPLUNK_TOKEN` in `.env`
-- [ ] Verify fallback: kill Splunk mid-session → dashboard stays live with local data
-- [ ] Optional: Splunk UF + OS metrics add-on → feed `perf_deviation_max` feature
-
-**To enable:**
-```env
-SPLUNK_HOST=your-splunk-host.example.com
-SPLUNK_PORT=8089
-SPLUNK_TOKEN=your-read-only-search-token
-```
-
----
-
-## Phase 2 — Investigation Agent (PENDING) ⏳
-
-**What is already written:**
-- `sentinellens/agent/base.py` — `InvestigationAgent` ABC
-- `sentinellens/agent/mcp_agent.py` — `MCPServerAgent` (translate NL → SPL → execute → summarize)
-- `/api/v1/investigate` endpoint — wired up, returns local mock response in Phase 0
-- Dashboard investigation panel — query input, result display with SPL transparency
-
-**What remains to be done:**
-- [ ] Obtain Splunk MCP Server URL
-- [ ] Test `MCPServerAgent` against a live MCP Server
-- [ ] Write `SplunkSDKAgent` as a fallback (if MCP is unstable)
-- [ ] Run agent evaluation — 15 fixed test questions, manual scoring → `eval/agent_eval.md`
-- [ ] Set `SPLUNK_MCP_URL` in `.env`
-
-**To enable:**
-```env
-SPLUNK_MCP_URL=https://your-mcp-server-url
-```
-
----
-
-## Phase 3 — Polish & Submission (PENDING) ⏳
-
-- [ ] Architecture diagram (PNG/SVG) — drawn from the actual built system, not aspirational
-- [ ] `SETUP.md` — Splunk integration guide with screenshots
-- [ ] OpenAPI spec — generated from Flask routes via `flask-openapi3`
-- [ ] Demo video — under 3 minutes: `make demo` → dashboard → incident drill-down → investigate query
-- [ ] `pytest` coverage ≥80% on correlator and scorer
-- [ ] MIT license SPDX headers on all source files
-- [ ] Final repo cleanup — no dead code, no credentials, no TODOs in tests
+> See [eval/agent_eval.md](eval/agent_eval.md) for full question set and analysis.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────┐    ┌──────────────────────────────────────────────────────────┐
-│   Data Sources      │    │                     Core Pipeline                         │
-│                     │    │                                                            │
-│  LocalFileDataSource├───►│  Normalizer → Correlator → FeatureExtractor → Scorer      │
-│  (Phase 0 ✅)       │    │                     │                                      │
-│                     │    │                     ▼                                      │
-│  SplunkDataSource   │    │              Repository (SQLite WAL)                      │
-│  (Phase 1 ⏳)       │    │                     │                                      │
-│                     │    │                     ▼                                      │
-└─────────────────────┘    │          REST API (Flask + Basic Auth)                    │
-        ▲                  │                     │                                      │
-        │ factory.py       │                     ▼                                      │
-        │ auto-selects     │           Dashboard (HTMX + Jinja2)                       │
-                           │                     │                                      │
-                           │                     ▼                                      │
-                           │       InvestigationAgent (Phase 2 ⏳)                     │
-                           │       MCPServerAgent / SplunkSDKAgent                     │
-                           └──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Data Sources                                 │
+│                                                                       │
+│   LocalFileDataSource ──┐                                            │
+│   (BOTS JSON/CSV)       ├──► factory.py (auto-selects)              │
+│   ✅ Phase 0            │                                            │
+│                         │                                            │
+│   SplunkDataSource ─────┘                                            │
+│   (REST API, index=botsv3)                                           │
+│   ✅ Phase 1                                                         │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Core Pipeline                                  │
+│                                                                       │
+│   EventNormalizer → EntityCorrelator → FeatureExtractor → Scorer    │
+│   (BOTS+CIM map)    (NetworkX graph)   (9-feature vec)   (LR/GBT)  │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────┐    ┌──────────────────────────────────────────────┐
+│  SQLite WAL DB   │◄───│           REST API (Flask + Basic Auth)      │
+│  7 tables        │    │           11 endpoints                        │
+└──────────────────┘    └──────────────────────┬───────────────────────┘
+                                               │
+                                               ▼
+                               ┌───────────────────────────┐
+                               │  HTMX Dashboard            │
+                               │  Incident list · Timeline  │
+                               │  Investigation panel        │
+                               └──────────────┬────────────┘
+                                              │
+                                              ▼
+                               ┌───────────────────────────┐
+                               │  Investigation Agent       │
+                               │  MCPServerAgent (Phase 2)  │
+                               │  → SplunkSDKAgent          │
+                               │  → LocalMockAgent          │
+                               └───────────────────────────┘
 ```
+
+Full diagram with sequence flow and component map: [docs/architecture.md](docs/architecture.md)
 
 ---
 
@@ -303,88 +144,168 @@ SPLUNK_MCP_URL=https://your-mcp-server-url
 ```
 SentinelLens/
 ├── sentinellens/
-│   ├── models.py              # All dataclasses — Event, IncidentCluster, ScoredIncident...
-│   ├── config.py              # .env loader + startup validation
+│   ├── models.py              # Event, IncidentCluster, ScoredIncident dataclasses
+│   ├── config.py              # .env loader + validation
 │   ├── datasource/
-│   │   ├── base.py            # DataSource ABC (critical isolation boundary)
+│   │   ├── base.py            # DataSource ABC (isolation boundary)
 │   │   ├── local.py           # LocalFileDataSource ✅
-│   │   ├── splunk.py          # SplunkDataSource ⏳ (code ready, needs live test)
+│   │   ├── splunk.py          # SplunkDataSource ✅
 │   │   └── factory.py         # Auto-selects correct datasource
 │   ├── pipeline/
 │   │   ├── normalizer.py      # BOTS + CIM field mapping
 │   │   ├── correlator.py      # NetworkX entity graph clustering
-│   │   ├── features.py        # 9-feature vector extraction
+│   │   ├── features.py        # 9-feature vector (frozen ML contract)
 │   │   ├── scorer.py          # ML model prediction
-│   │   └── runner.py          # Pipeline orchestrator (async + sync modes)
+│   │   └── runner.py          # Async + sync pipeline orchestrator
 │   ├── agent/
 │   │   ├── base.py            # InvestigationAgent ABC
-│   │   └── mcp_agent.py       # MCPServerAgent ⏳
+│   │   └── mcp_agent.py       # MCPServerAgent (Phase 2)
 │   ├── api/
 │   │   ├── app.py             # Flask application factory
 │   │   ├── auth.py            # HTTP Basic Auth middleware
-│   │   └── routes/
-│   │       ├── health.py
-│   │       ├── incidents.py
-│   │       ├── pipeline.py
-│   │       └── investigate.py
+│   │   └── routes/            # health, incidents, pipeline, investigate
 │   └── db/
-│       ├── schema.sql          # Full SQLite DDL — 7 tables
-│       └── repository.py       # All DB operations — parameterized SQL only
+│       ├── schema.sql          # SQLite DDL — 7 tables
+│       └── repository.py       # All DB ops — parameterized SQL only
 ├── templates/
-│   ├── base.html               # Dark theme, HTMX CDN, navigation
-│   ├── incidents.html          # Ranked incident list dashboard
-│   └── incident_detail.html    # Timeline + features + investigation panel
+│   ├── base.html               # Dark theme, HTMX, navigation
+│   ├── incidents.html          # Ranked incident dashboard
+│   └── incident_detail.html    # Timeline + features + NL investigation
 ├── data/
-│   ├── bots_sample_events.json # 600 synthetic BOTS events — runs out of the box
-│   └── README.md               # Data attribution and scenario descriptions
+│   ├── bots_sample_events.json # 600 synthetic BOTS events (out-of-the-box demo)
+│   └── README.md
 ├── eval/
-│   ├── train.py                # Reproducible ML training script
-│   └── scorer_report.md        # Measured precision / recall / F1
+│   ├── train.py                # Reproducible ML training (LR vs GBT, seed=42)
+│   ├── scorer_report.md        # Measured precision/recall/F1 ✅
+│   └── agent_eval.md           # 15 NL query manual evaluation ✅
 ├── models/
-│   └── scorer_v1.joblib        # Trained model artifact (generated by eval/train.py)
-├── .env.example                # Config template — no secrets, safe to commit
+│   └── scorer_v1.joblib        # Trained model artifact
+├── docs/
+│   ├── architecture.md         # Full system diagram (Mermaid) ✅
+│   ├── openapi.json            # OpenAPI 3.0 spec ✅
+│   └── api-reference.md        # Human-readable API reference ✅
+├── .env.example
 ├── .gitignore
 ├── Dockerfile
 ├── docker-compose.yml
 ├── Makefile
-├── requirements.txt            # Pinned production dependencies
-├── requirements-dev.txt        # pytest, black, ruff, bandit
-└── LICENSE                     # MIT
+├── SETUP.md                    # Splunk integration guide ✅
+├── requirements.txt
+└── LICENSE
 ```
 
 ---
 
-## Configuration Reference
+## API Reference
 
-| Variable | Phase | Required | Default | Description |
-|----------|-------|----------|---------|-------------|
-| `DASHBOARD_USER` | 0 | No | `admin` | Dashboard login username |
-| `DASHBOARD_PASSWORD` | 0 | **Yes** | `admin123` | Dashboard login password — change this |
-| `FLASK_SECRET_KEY` | 0 | **Yes** | dev default | Flask session secret (use 32+ random chars in production) |
-| `BOTS_DATA_PATH` | 0 | No | `data/bots_sample_events.json` | Path to local BOTS data file |
-| `MODEL_PATH` | 0 | No | `models/scorer_v1.joblib` | Path to trained scorer model |
-| `CORRELATION_WINDOW_MINUTES` | 0 | No | `15` | Sliding time window for event correlation |
-| `MIN_CLUSTER_SIZE` | 0 | No | `2` | Minimum events required to form an incident |
-| `SPLUNK_HOST` | 1 | No | _(empty)_ | Splunk instance hostname |
-| `SPLUNK_PORT` | 1 | No | `8089` | Splunk REST API port |
-| `SPLUNK_TOKEN` | 1 | No | _(empty)_ | Read-only search token |
-| `SPLUNK_MCP_URL` | 2 | No | _(empty)_ | Splunk MCP Server URL |
+All endpoints require HTTP Basic Auth (`admin` / `admin123`).
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/health` | System health — datasource, scorer, DB |
+| GET | `/api/v1/incidents` | Paginated incidents, sorted by score DESC |
+| GET | `/api/v1/incidents/<id>` | Incident detail with cluster |
+| GET | `/api/v1/incidents/<id>/timeline` | Events sorted by timestamp |
+| GET | `/api/v1/incidents/<id>/features` | 9-feature vector (explainability) |
+| GET | `/api/v1/model/report` | Active model precision/recall/F1 |
+| POST | `/api/v1/pipeline/run` | Trigger async pipeline run |
+| GET | `/api/v1/pipeline/status/<run_id>` | Poll pipeline status |
+| GET | `/api/v1/datasource/status` | Active datasource mode |
+| POST | `/api/v1/investigate` | Submit NL investigation query |
+| GET | `/api/v1/investigate/<session_id>` | Poll investigation result |
+
+Full OpenAPI 3.0 spec: [docs/openapi.json](docs/openapi.json)
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env`:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DASHBOARD_PASSWORD` | **Yes** | `admin123` | Change before any real deployment |
+| `FLASK_SECRET_KEY` | **Yes** | dev default | 32+ random chars in production |
+| `BOTS_DATA_PATH` | No | `data/bots_sample_events.json` | Local data file |
+| `MODEL_PATH` | No | `models/scorer_v1.joblib` | Trained scorer |
+| `SPLUNK_HOST` | Phase 1 | _(empty)_ | Splunk hostname |
+| `SPLUNK_TOKEN` | Phase 1 | _(empty)_ | Read-only search token |
+| `SPLUNK_MCP_URL` | Phase 2 | _(empty)_ | MCP Server URL |
+| `SPLUNK_MCP_TOKEN` | Phase 2 | _(empty)_ | MCP encrypted token |
+
+---
+
+## Splunk Integration Details
+
+### Data Source (Phase 1)
+- Connects to `https://<host>:8089` using Splunk REST API
+- Default SPL: `search index=botsv3 earliest=0 | head 5000`
+- Uses Bearer token auth — no SDK parser (avoids binary field encoding issues in BOTS v3)
+- Graceful fallback: Splunk unreachable → local data → "OFFLINE MODE" banner
+
+### MCP Server (Phase 2)
+- App: `Splunk MCP Server` v1.3.1 installed from Splunkbase
+- Endpoint: `http://localhost:8000/en-US/splunkd/__raw/services/mcp`
+- Authentication: encrypted token (created from MCP Server app UI)
+- Fallback chain: `MCPServerAgent` → `local_mock`
+
+> On local Splunk Enterprise installs, MCP OAuth validation requires Splunk Cloud
+> connectivity. When unavailable, `local_mock` generates incident-specific SPL
+> queries per FR2.3 (graceful degradation).
+
+---
+
+## Key Design Decisions
+
+### DataSource Isolation
+`LocalFileDataSource` and `SplunkDataSource` both implement the same `DataSource` ABC. No downstream component imports either directly — all access goes through `datasource/factory.py`. This is what makes Phase 0 a complete standalone deliverable independent of Splunk.
+
+### Deterministic Cluster IDs
+Cluster IDs are generated from `md5(entity_id + time_start)` — the same cluster of events always produces the same ID. Combined with `INSERT OR IGNORE`, running the pipeline multiple times never creates duplicate incidents.
+
+### ML Feature Contract
+`IncidentFeatures.to_vector()` order is frozen. Changing it without retraining the model produces silently wrong scores. The 9-feature order is documented in [docs/architecture.md](docs/architecture.md).
 
 ---
 
 ## Makefile Commands
 
 ```bash
-make demo        # Train model (if needed) + start dashboard at localhost:5000
-make eval        # Run eval/train.py — train model and write scorer_report.md
-make test        # Run pytest with coverage report
-make lint        # ruff check + black --check + bandit security scan
+make demo        # Train model + start dashboard at localhost:5000
+make eval        # Retrain model, write eval/scorer_report.md
+make test        # pytest with coverage
+make lint        # ruff + black + bandit
 make docker-up   # docker compose up --build
-make clean       # Remove __pycache__, *.db, coverage files
+make clean       # Remove cache, DB, coverage files
 ```
+
+---
+
+## Hackathon Deliverables
+
+| Item | Status | Location |
+|------|--------|----------|
+| Public GitHub repo, MIT license | ✅ | https://github.com/Tahha2003/SentinelLens |
+| README with setup instructions | ✅ | This file |
+| requirements.txt | ✅ | `requirements.txt` |
+| Architecture diagram | ✅ | `docs/architecture.md` |
+| Sample data (no Splunk needed) | ✅ | `data/bots_sample_events.json` |
+| API documentation (OpenAPI) | ✅ | `docs/openapi.json` |
+| Evaluation report (precision/recall/F1) | ✅ | `eval/scorer_report.md` |
+| Agent evaluation (manual scoring) | ✅ | `eval/agent_eval.md` |
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+## Security Notes
+
+- HTTP Basic Auth on every route including `/health`
+- All SQL parameterized — zero string concatenation
+- `.env` in `.gitignore` — no credentials committed
+- Splunk token is read-only (search only, no write/delete/execute)
+- No auto-remediation — system is fully read-only against Splunk

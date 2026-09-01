@@ -39,33 +39,21 @@ class Repository:
         """
         Context manager for a single SQLite connection.
         Commits on clean exit, rolls back on exception.
-        PRAGMA settings are applied per-connection (SQLite requirement).
+        timeout=30 lets SQLite itself serialize concurrent writers — no retry loop needed.
         """
-        retries = 0
-        while True:
-            try:
-                conn = sqlite3.connect(str(self._db_path), timeout=10.0)
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA foreign_keys=ON")
-                conn.execute("PRAGMA synchronous=NORMAL")
-                try:
-                    yield conn
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    raise
-                finally:
-                    conn.close()
-                break
-            except sqlite3.OperationalError as exc:
-                if "locked" in str(exc).lower() and retries < self.MAX_RETRIES:
-                    retries += 1
-                    logger.warning("DB locked, retry %d/%d", retries, self.MAX_RETRIES)
-                    time.sleep(self.RETRY_DELAY_SECS)
-                else:
-                    logger.error("DB operation failed after %d retries: %s", retries, exc)
-                    raise
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         """Apply schema DDL. Safe to call on every startup (CREATE IF NOT EXISTS)."""
@@ -132,7 +120,7 @@ class Repository:
         """
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO incident_clusters
+                """INSERT OR IGNORE INTO incident_clusters
                    (cluster_id, time_start, time_end, entities, features,
                     is_truncated, pipeline_run_id)
                    VALUES (?,?,?,?,?,?,?)""",
@@ -156,7 +144,7 @@ class Repository:
     def insert_scored_incident(self, si) -> None:
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO scored_incidents
+                """INSERT OR IGNORE INTO scored_incidents
                    (incident_id, cluster_id, score, confidence_band, model_version, label)
                    VALUES (?,?,?,?,?,?)""",
                 (
