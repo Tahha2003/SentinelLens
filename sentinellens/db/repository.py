@@ -120,7 +120,7 @@ class Repository:
         """
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO incident_clusters
+                """INSERT OR IGNORE INTO incident_clusters
                    (cluster_id, time_start, time_end, entities, features,
                     is_truncated, pipeline_run_id)
                    VALUES (?,?,?,?,?,?,?)""",
@@ -144,7 +144,7 @@ class Repository:
     def insert_scored_incident(self, si) -> None:
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO scored_incidents
+                """INSERT OR IGNORE INTO scored_incidents
                    (incident_id, cluster_id, score, confidence_band, model_version, label)
                    VALUES (?,?,?,?,?,?)""",
                 (

@@ -154,8 +154,14 @@ class EntityCorrelator:
         time_end = cluster_events[-1].timestamp
         features = self._extractor.extract(cluster_events, time_start, time_end)
 
+        # Deterministic cluster_id based on entity + time_start
+        # so the same cluster is not re-inserted on every pipeline run
+        import hashlib
+        id_src = sorted(entities)[0] + time_start.isoformat()
+        cluster_id = str(uuid.UUID(hashlib.md5(id_src.encode()).hexdigest()))
+
         return IncidentCluster(
-            cluster_id=str(uuid.uuid4()),
+            cluster_id=cluster_id,
             events=cluster_events,
             entities=entities,
             time_start=time_start,
