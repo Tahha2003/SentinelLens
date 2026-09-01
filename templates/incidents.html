@@ -3,142 +3,560 @@
 
 {% block content %}
 
+{# ── Pre-compute counts ──────────────────────────────────────────────────── #}
+{% set high_count   = incidents | selectattr('confidence_band','eq','HIGH')   | list | length %}
+{% set medium_count = incidents | selectattr('confidence_band','eq','MEDIUM') | list | length %}
+{% set low_count    = incidents | selectattr('confidence_band','eq','LOW')    | list | length %}
+
+{# ── Datasource alert ───────────────────────────────────────────────────── #}
 {% if datasource_mode == 'local_bots' %}
-<div class="alert alert-offline">
-  📡 <strong>OFFLINE / DEMO MODE</strong> — Running on local BOTS sample data. Set <code>SPLUNK_HOST</code> and <code>SPLUNK_TOKEN</code> in <code>.env</code> to connect to live Splunk.
+<div class="alert alert-offline animate-in" style="animation-delay:0.05s">
+  <span style="font-size:16px">📡</span>
+  <div>
+    <strong>OFFLINE / DEMO MODE</strong> — Running on local BOTS sample data.
+    Set <code style="background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:4px;">SPLUNK_HOST</code>
+    and <code style="background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:4px;">SPLUNK_TOKEN</code>
+    in your <code style="background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:4px;">.env</code> to connect to live Splunk.
+  </div>
 </div>
 {% else %}
-<div class="alert alert-success">
-  ✅ Connected to Splunk Live (<code>{{ datasource_mode }}</code>)
+<div class="alert alert-success animate-in" style="animation-delay:0.05s">
+  <span style="font-size:16px">✅</span>
+  <div>
+    Connected to <strong>Splunk Live</strong>
+    <code style="background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:4px;">{{ datasource_mode }}</code>
+  </div>
 </div>
 {% endif %}
 
-<div class="page-header">
+{# ── Page header ────────────────────────────────────────────────────────── #}
+<div class="page-header animate-in" style="animation-delay:0.08s">
   <h1>Incident Dashboard</h1>
-  <p>{{ total }} incident{% if total != 1 %}s{% endif %} scored — ranked by model confidence</p>
+  <p id="total-subtitle">{{ total }} incident{% if total != 1 %}s{% endif %} scored — ranked by model confidence</p>
 </div>
 
-<!-- Stats row -->
-<div class="stat-grid">
-  {% set high_count   = incidents | selectattr('confidence_band','eq','HIGH')   | list | length %}
-  {% set medium_count = incidents | selectattr('confidence_band','eq','MEDIUM') | list | length %}
-  {% set low_count    = incidents | selectattr('confidence_band','eq','LOW')    | list | length %}
-  <div class="stat-card">
-    <div class="stat-label">Total</div>
-    <div class="stat-value">{{ total }}</div>
+{# ── Stat cards ─────────────────────────────────────────────────────────── #}
+<div class="stat-grid stagger">
+  <div class="stat-card stat-card-total animate-in">
+    <span class="stat-icon">🛡️</span>
+    <div class="stat-label">Total Incidents</div>
+    <div class="stat-value" id="cnt-total">{{ total }}</div>
   </div>
-  <div class="stat-card">
-    <div class="stat-label" style="color:var(--high)">High</div>
-    <div class="stat-value" style="color:var(--high)">{{ high_count }}</div>
+  <div class="stat-card stat-card-high animate-in">
+    <span class="stat-icon">🔴</span>
+    <div class="stat-label">High Severity</div>
+    <div class="stat-value" id="cnt-high">{{ high_count }}</div>
   </div>
-  <div class="stat-card">
-    <div class="stat-label" style="color:var(--medium)">Medium</div>
-    <div class="stat-value" style="color:var(--medium)">{{ medium_count }}</div>
+  <div class="stat-card stat-card-medium animate-in">
+    <span class="stat-icon">🟡</span>
+    <div class="stat-label">Medium Severity</div>
+    <div class="stat-value" id="cnt-medium">{{ medium_count }}</div>
   </div>
-  <div class="stat-card">
-    <div class="stat-label" style="color:var(--low)">Low</div>
-    <div class="stat-value" style="color:var(--low)">{{ low_count }}</div>
+  <div class="stat-card stat-card-low animate-in">
+    <span class="stat-icon">🟢</span>
+    <div class="stat-label">Low Severity</div>
+    <div class="stat-value" id="cnt-low">{{ low_count }}</div>
   </div>
 </div>
 
-<!-- Pipeline trigger -->
-<div class="card" style="margin-bottom:16px;">
-  <div class="card-body" style="display:flex;align-items:center;gap:12px;">
-    <button class="btn btn-primary"
+{# ── Charts row ─────────────────────────────────────────────────────────── #}
+{% if incidents %}
+<div style="display:grid;grid-template-columns:280px 1fr;gap:16px;margin-bottom:24px;" class="animate-in" style="animation-delay:0.2s">
+
+  <!-- Donut chart -->
+  <div class="card">
+    <div class="card-header">
+      <span><span class="card-header-icon">🍩</span>Band Distribution</span>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;align-items:center;gap:16px;">
+      <div style="position:relative;width:160px;height:160px;">
+        <canvas id="donutChart" width="160" height="160"></canvas>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
+          <span style="font-size:22px;font-weight:800;color:var(--text);">{{ total }}</span>
+          <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Total</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+          <span style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:2px;background:var(--high);display:inline-block;"></span>High</span>
+          <span style="font-weight:600;color:var(--high);">{{ high_count }}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+          <span style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:2px;background:var(--medium);display:inline-block;"></span>Medium</span>
+          <span style="font-weight:600;color:var(--medium);">{{ medium_count }}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+          <span style="display:flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:2px;background:var(--low);display:inline-block;"></span>Low</span>
+          <span style="font-weight:600;color:var(--low);">{{ low_count }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bar chart: top incidents by event count -->
+  <div class="card">
+    <div class="card-header">
+      <span><span class="card-header-icon">📊</span>Top Incidents by Event Count</span>
+    </div>
+    <div class="card-body" style="position:relative;height:220px;">
+      <canvas id="barChart"></canvas>
+    </div>
+  </div>
+
+</div>
+{% endif %}
+
+{# ── Pipeline control bar ───────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:20px;" class="animate-in">
+  <div class="card-body" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+
+    <button class="btn btn-primary" id="run-pipeline-btn"
       hx-post="/api/v1/pipeline/run"
       hx-target="#pipeline-status"
       hx-swap="innerHTML"
-      hx-on:click="this.disabled=true; this.textContent='Running…'"
-      hx-on:htmx:after-request="setTimeout(()=>{this.disabled=false;this.textContent='▶ Run Pipeline';location.reload()}, 120000)"
-      hx-headers='{"Authorization": "Basic {{ (dashboard_user + ":" + dashboard_password) | b64encode }}"}'>
+      hx-headers='{"Authorization": "Basic {{ (dashboard_user + ":" + dashboard_password) | b64encode }}"}'
+      onclick="onPipelineStart(this)">
       ▶ Run Pipeline
     </button>
-    <div id="pipeline-status" style="font-size:13px;color:var(--muted);">
+
+    <div id="pipeline-status" style="font-size:13px;color:var(--text-dim);display:flex;align-items:center;gap:8px;">
       {% if recent_runs %}
-        Last run: <strong>{{ recent_runs[0].status }}</strong>
-        {% if recent_runs[0].cluster_count is not none %}
-          — {{ recent_runs[0].cluster_count }} clusters
+        {% set lr = recent_runs[0] %}
+        <span class="badge {% if lr.status == 'complete' %}badge-low{% elif lr.status == 'failed' %}badge-high{% else %}badge-info{% endif %}">
+          {{ lr.status }}
+        </span>
+        {% if lr.cluster_count is not none %}
+          <span style="color:var(--text-muted);">—</span>
+          <span>{{ lr.cluster_count }} clusters</span>
+        {% endif %}
+        {% if lr.started_at %}
+          <span style="color:var(--text-muted);font-size:12px;">{{ lr.started_at[:19] }}</span>
         {% endif %}
       {% else %}
-        No pipeline runs yet.
+        <span style="color:var(--text-muted);">No pipeline runs yet.</span>
       {% endif %}
     </div>
+
   </div>
 </div>
 
-<!-- Incidents table -->
-<div class="card">
+{# ── Incidents table ─────────────────────────────────────────────────────── #}
+<div class="card animate-in" style="animation-delay:0.25s">
   <div class="card-header">
-    <span>Incidents</span>
-    <span style="font-size:12px;color:var(--muted);font-weight:400;">Sorted by score ↓</span>
+    <span><span class="card-header-icon">📋</span>Incidents</span>
+    <span style="font-size:12px;color:var(--text-muted);font-weight:400;">Sorted by score ↓</span>
   </div>
 
+  <!-- Filter bar -->
+  <div style="padding:14px 18px 0;">
+    <div class="filter-bar">
+      <div class="filter-group" id="band-filter-group">
+        <button class="filter-btn active-all" data-band="ALL"    onclick="setBandFilter('ALL')">ALL</button>
+        <button class="filter-btn"            data-band="HIGH"   onclick="setBandFilter('HIGH')">HIGH</button>
+        <button class="filter-btn"            data-band="MEDIUM" onclick="setBandFilter('MEDIUM')">MED</button>
+        <button class="filter-btn"            data-band="LOW"    onclick="setBandFilter('LOW')">LOW</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-left:6px;">
+        <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">Score ≥</span>
+        <input type="range" min="0" max="100" value="0" step="5" class="score-slider" id="score-threshold"
+               oninput="onScoreSlider(this.value)">
+        <span style="font-size:12px;color:var(--text-dim);min-width:28px;" id="score-threshold-label">0.00</span>
+      </div>
+
+      <div class="search-wrapper" style="margin-left:auto;">
+        <input type="text" class="search-input" id="entity-search"
+               placeholder="Filter by entity…"
+               oninput="onEntitySearch(this.value)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
   {% if incidents %}
-  <table>
-    <thead>
-      <tr>
-        <th>Score</th>
-        <th>Band</th>
-        <th>Events</th>
-        <th>Entities</th>
-        <th>Severity Max</th>
-        <th>Start</th>
-        <th>Duration</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for inc in incidents %}
-      <tr>
-        <td>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-weight:600;font-variant-numeric:tabular-nums;">{{ "%.2f"|format(inc.score) }}</span>
-            <div class="score-bar">
-              <div class="score-bar-fill" style="width:{{ (inc.score * 100)|int }}%;
-                background:{% if inc.confidence_band == 'HIGH' %}var(--high){% elif inc.confidence_band == 'MEDIUM' %}var(--medium){% else %}var(--low){% endif %};"></div>
+  <div class="table-wrapper" id="incidents-table-container">
+    <table id="incidents-table">
+      <thead>
+        <tr>
+          <th>Score</th>
+          <th>Band</th>
+          <th>Events</th>
+          <th>Entities</th>
+          <th style="text-align:center;">Sev Max</th>
+          <th>Start</th>
+          <th>Duration</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="incidents-tbody">
+        {% for inc in incidents %}
+        <tr class="inc-row animate-in stagger"
+            data-band="{{ inc.confidence_band }}"
+            data-score="{{ inc.score }}"
+            data-entities="{{ (inc.entities | join(' ')) if inc.entities else '' }}"
+            style="animation-delay:{{ loop.index0 * 0.03 }}s">
+
+          <!-- Score -->
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-weight:700;font-variant-numeric:tabular-nums;font-size:13px;color:{% if inc.confidence_band == 'HIGH' %}var(--high){% elif inc.confidence_band == 'MEDIUM' %}var(--medium){% else %}var(--low){% endif %};">
+                {{ "%.3f"|format(inc.score) }}
+              </span>
+              <div class="score-bar">
+                <div class="score-bar-fill"
+                     style="width:{{ (inc.score * 100)|int }}%;
+                            background:{% if inc.confidence_band == 'HIGH' %}linear-gradient(90deg,var(--high),#ef4444){% elif inc.confidence_band == 'MEDIUM' %}linear-gradient(90deg,var(--medium),#f59e0b){% else %}linear-gradient(90deg,var(--low),#10b981){% endif %};
+                            box-shadow: 0 0 6px {% if inc.confidence_band == 'HIGH' %}var(--high-glow){% elif inc.confidence_band == 'MEDIUM' %}var(--medium-glow){% else %}var(--low-glow){% endif %};">
+                </div>
+              </div>
             </div>
-          </div>
-        </td>
-        <td>
-          <span class="badge badge-{{ inc.confidence_band|lower }}">{{ inc.confidence_band }}</span>
-          {% if inc.is_truncated %}<span class="truncated-badge">TRUNCATED</span>{% endif %}
-        </td>
-        <td>{{ inc.event_count }}</td>
-        <td>
-          {% if inc.entities %}
-            {% for e in inc.entities[:3] %}
-              <span style="font-size:11px;color:var(--muted);">{{ e }}</span>{% if not loop.last %}, {% endif %}
-            {% endfor %}
-            {% if inc.entities|length > 3 %}
-              <span style="font-size:11px;color:var(--muted);">+{{ inc.entities|length - 3 }} more</span>
-            {% endif %}
-          {% endif %}
-        </td>
-        <td>
-          <span style="color:{% if inc.severity_max == 5 %}var(--high){% elif inc.severity_max >= 4 %}var(--high){% elif inc.severity_max == 3 %}var(--medium){% else %}var(--low){% endif %};">
-            {{ inc.severity_max }}
-          </span>
-        </td>
-        <td style="color:var(--muted);font-size:12px;">{{ inc.time_start[:19] if inc.time_start else '—' }}</td>
-        <td style="color:var(--muted);font-size:12px;">
-          {% set mins = inc.time_span_minutes %}
-          {% if mins is not none %}
-            {% if mins < 1 %}{{ (mins * 60)|int }}s{% else %}{{ mins|int }}m{% endif %}
-          {% endif %}
-        </td>
-        <td>
-          <a href="/incidents/{{ inc.incident_id }}" class="btn" style="padding:4px 10px;font-size:12px;">View →</a>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          </td>
+
+          <!-- Band -->
+          <td>
+            <span class="badge badge-{{ inc.confidence_band|lower }}">{{ inc.confidence_band }}</span>
+            {% if inc.is_truncated %}<span class="truncated-badge">TRUNC</span>{% endif %}
+          </td>
+
+          <!-- Events -->
+          <td style="font-variant-numeric:tabular-nums;">{{ inc.event_count }}</td>
+
+          <!-- Entities -->
+          <td>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;max-width:220px;">
+              {% if inc.entities %}
+                {% for e in inc.entities[:3] %}
+                  <span class="badge badge-info" style="font-size:10px;padding:2px 7px;">
+                    {% if '.' in e or ':' in e %}🌐{% elif e.startswith('user') or e.startswith('User') %}👤{% else %}🖥️{% endif %}
+                    {{ e }}
+                  </span>
+                {% endfor %}
+                {% if inc.entities|length > 3 %}
+                  <span class="badge badge-muted" style="font-size:10px;padding:2px 7px;">+{{ inc.entities|length - 3 }}</span>
+                {% endif %}
+              {% else %}
+                <span style="color:var(--text-muted);font-size:12px;">—</span>
+              {% endif %}
+            </div>
+          </td>
+
+          <!-- Severity Max -->
+          <td style="text-align:center;">
+            <span style="
+              display:inline-flex;align-items:center;justify-content:center;
+              width:28px;height:28px;border-radius:6px;font-weight:700;font-size:13px;
+              background:{% if inc.severity_max >= 4 %}var(--high-bg){% elif inc.severity_max == 3 %}var(--medium-bg){% else %}var(--low-bg){% endif %};
+              color:{% if inc.severity_max >= 4 %}var(--high){% elif inc.severity_max == 3 %}var(--medium){% else %}var(--low){% endif %};
+              border:1px solid {% if inc.severity_max >= 4 %}var(--high-border){% elif inc.severity_max == 3 %}var(--medium-border){% else %}var(--low-border){% endif %};">
+              {{ inc.severity_max }}
+            </span>
+          </td>
+
+          <!-- Start time -->
+          <td style="color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;">
+            {{ inc.time_start[:19] if inc.time_start else '—' }}
+          </td>
+
+          <!-- Duration -->
+          <td style="color:var(--text-dim);font-size:12px;">
+            {% set mins = inc.time_span_minutes %}
+            {% if mins is not none %}
+              {% if mins < 1 %}{{ (mins * 60)|int }}s
+              {% elif mins < 60 %}{{ mins|int }}m
+              {% else %}{{ (mins / 60)|int }}h {{ (mins % 60)|int }}m{% endif %}
+            {% else %}—{% endif %}
+          </td>
+
+          <!-- View button -->
+          <td>
+            <a href="/incidents/{{ inc.incident_id }}" class="btn" style="padding:5px 12px;font-size:12px;" onmouseenter="this.querySelector('.arrow').style.transform='translateX(3px)'" onmouseleave="this.querySelector('.arrow').style.transform=''">
+              View <span class="arrow" style="display:inline-block;transition:transform 0.15s;">→</span>
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div class="pagination" id="pagination-bar">
+    <div class="pagination-info" id="pagination-info">
+      Showing <span id="page-from">1</span>–<span id="page-to">{{ incidents|length }}</span> of <span id="page-total">{{ total }}</span> incidents
+    </div>
+    <div class="pagination-controls" id="pagination-controls"></div>
+  </div>
+
   {% else %}
-  <div class="card-body" style="text-align:center;padding:48px;color:var(--muted);">
-    <p style="font-size:16px;margin-bottom:8px;">No incidents yet.</p>
-    <p>Click <strong>Run Pipeline</strong> to process the sample data.</p>
+  <div class="card-body" style="text-align:center;padding:56px;color:var(--text-muted);">
+    <div style="font-size:40px;margin-bottom:12px;">🔍</div>
+    <p style="font-size:16px;font-weight:600;margin-bottom:6px;color:var(--text-dim);">No incidents yet</p>
+    <p style="font-size:13px;">Click <strong style="color:var(--accent);">▶ Run Pipeline</strong> to process sample data.</p>
   </div>
   {% endif %}
 </div>
+
+<!-- ──────────────────────────────────────────────────────────────────────── -->
+<script>
+// ── Constants from server ─────────────────────────────────────────────────
+const TOTAL       = {{ total }};
+const HIGH_COUNT  = {{ high_count }};
+const MED_COUNT   = {{ medium_count }};
+const LOW_COUNT   = {{ low_count }};
+const PAGE_LIMIT  = 20;
+
+// ── Animate stat counters on load ─────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  [
+    ['cnt-total',  TOTAL],
+    ['cnt-high',   HIGH_COUNT],
+    ['cnt-medium', MED_COUNT],
+    ['cnt-low',    LOW_COUNT],
+  ].forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) animateCounter(el, val, 900);
+  });
+
+  initCharts();
+  initPagination();
+});
+
+// ── Pipeline button ───────────────────────────────────────────────────────
+function onPipelineStart(btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner spinner-sm"></div> Running…';
+  btn.classList.add('btn-running');
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Run Pipeline';
+    btn.classList.remove('btn-running');
+    location.reload();
+  }, 120000);
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────
+function initCharts() {
+  // Donut chart
+  const donutCtx = document.getElementById('donutChart');
+  if (donutCtx) {
+    new Chart(donutCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['HIGH', 'MEDIUM', 'LOW'],
+        datasets: [{
+          data: [HIGH_COUNT, MED_COUNT, LOW_COUNT],
+          backgroundColor: [
+            'rgba(248,113,113,0.8)',
+            'rgba(251,191,36,0.8)',
+            'rgba(52,211,153,0.8)',
+          ],
+          borderColor: ['#f87171','#fbbf24','#34d399'],
+          borderWidth: 1.5,
+          hoverOffset: 6,
+        }]
+      },
+      options: {
+        responsive: false,
+        cutout: '72%',
+        animation: { animateScale: true, duration: 900 },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0d1224',
+            borderColor: 'rgba(99,120,200,0.3)',
+            borderWidth: 1,
+            titleColor: '#e2e8f8',
+            bodyColor: '#8892b0',
+            padding: 10,
+          }
+        }
+      }
+    });
+  }
+
+  // Bar chart: top 5 incidents by event count
+  const barCtx = document.getElementById('barChart');
+  if (barCtx) {
+    // Collect data from rows
+    const rows = Array.from(document.querySelectorAll('#incidents-tbody tr'));
+    const top5 = rows
+      .map(r => ({
+        id:    r.cells[0]?.querySelector('.score-bar-fill') ? r.getAttribute('data-band') : '',
+        score: parseFloat(r.getAttribute('data-score') || '0'),
+        events: parseInt(r.cells[2]?.textContent?.trim() || '0'),
+        band:   r.getAttribute('data-band') || '',
+        label:  r.cells[7]?.querySelector('a')?.getAttribute('href')?.split('/').pop()?.slice(0,8) || '',
+      }))
+      .sort((a,b) => b.events - a.events)
+      .slice(0, 5);
+
+    const bgColors = top5.map(d =>
+      d.band === 'HIGH' ? 'rgba(248,113,113,0.7)' :
+      d.band === 'MEDIUM' ? 'rgba(251,191,36,0.7)' :
+      'rgba(52,211,153,0.7)'
+    );
+
+    new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels: top5.map(d => d.label + '…'),
+        datasets: [{
+          label: 'Events',
+          data: top5.map(d => d.events),
+          backgroundColor: bgColors,
+          borderColor: bgColors.map(c => c.replace('0.7', '1')),
+          borderWidth: 1,
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        animation: { duration: 900, easing: 'easeOutQuart' },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0d1224',
+            borderColor: 'rgba(99,120,200,0.3)',
+            borderWidth: 1,
+            titleColor: '#e2e8f8',
+            bodyColor: '#8892b0',
+            padding: 10,
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(99,120,200,0.08)' },
+            ticks: { color: '#4a5568', font: { size: 11 } },
+            border: { display: false },
+          },
+          y: {
+            grid: { display: false },
+            ticks: { color: '#8892b0', font: { size: 11, family: 'Consolas, monospace' } },
+            border: { display: false },
+          }
+        }
+      }
+    });
+  }
+}
+
+// ── Filtering ─────────────────────────────────────────────────────────────
+let activeBand     = 'ALL';
+let scoreThreshold = 0;
+let entityQuery    = '';
+
+function setBandFilter(band) {
+  activeBand = band;
+  document.querySelectorAll('#band-filter-group .filter-btn').forEach(btn => {
+    btn.className = 'filter-btn';
+    if (btn.getAttribute('data-band') === band) {
+      btn.classList.add('active-' + band);
+    }
+  });
+  applyFilters();
+}
+
+function onScoreSlider(val) {
+  scoreThreshold = parseInt(val) / 100;
+  document.getElementById('score-threshold-label').textContent = scoreThreshold.toFixed(2);
+  applyFilters();
+}
+
+function onEntitySearch(val) {
+  entityQuery = val.toLowerCase().trim();
+  applyFilters();
+}
+
+function applyFilters() {
+  const rows = document.querySelectorAll('#incidents-tbody tr.inc-row');
+  let visible = 0;
+  rows.forEach(row => {
+    const band    = row.getAttribute('data-band');
+    const score   = parseFloat(row.getAttribute('data-score') || '0');
+    const ents    = (row.getAttribute('data-entities') || '').toLowerCase();
+    const bandOk  = activeBand === 'ALL' || band === activeBand;
+    const scoreOk = score >= scoreThreshold;
+    const entOk   = !entityQuery || ents.includes(entityQuery);
+    const show    = bandOk && scoreOk && entOk;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  // Update pagination info
+  const pInfo = document.getElementById('pagination-info');
+  if (pInfo) {
+    document.getElementById('page-from').textContent = visible > 0 ? '1' : '0';
+    document.getElementById('page-to').textContent   = visible;
+    document.getElementById('page-total').textContent = visible;
+  }
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────
+function initPagination() {
+  const controls = document.getElementById('pagination-controls');
+  if (!controls || TOTAL <= PAGE_LIMIT) return;
+
+  const currentPage = parseInt(new URLSearchParams(window.location.search).get('page') || '1');
+  const totalPages  = Math.ceil(TOTAL / PAGE_LIMIT);
+
+  function goTo(page) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('page', page);
+    window.location.search = params.toString();
+  }
+
+  // Prev button
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'page-btn';
+  prevBtn.textContent = '←';
+  prevBtn.disabled = currentPage <= 1;
+  prevBtn.onclick = () => goTo(currentPage - 1);
+  controls.appendChild(prevBtn);
+
+  // Page numbers (show max 7, with ellipsis)
+  let pages = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages = [1];
+    if (currentPage > 3) pages.push('…');
+    for (let i = Math.max(2, currentPage-1); i <= Math.min(totalPages-1, currentPage+1); i++) pages.push(i);
+    if (currentPage < totalPages - 2) pages.push('…');
+    pages.push(totalPages);
+  }
+
+  pages.forEach(p => {
+    if (p === '…') {
+      const el = document.createElement('span');
+      el.style.cssText = 'padding:0 4px;color:var(--text-muted);font-size:12px;line-height:32px;';
+      el.textContent = '…';
+      controls.appendChild(el);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'page-btn' + (p === currentPage ? ' active' : '');
+      btn.textContent = p;
+      btn.onclick = () => goTo(p);
+      controls.appendChild(btn);
+    }
+  });
+
+  // Next button
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'page-btn';
+  nextBtn.textContent = '→';
+  nextBtn.disabled = currentPage >= totalPages;
+  nextBtn.onclick = () => goTo(currentPage + 1);
+  controls.appendChild(nextBtn);
+
+  // Update pagination info text
+  const from = (currentPage - 1) * PAGE_LIMIT + 1;
+  const to   = Math.min(currentPage * PAGE_LIMIT, TOTAL);
+  const pFrom = document.getElementById('page-from');
+  const pTo   = document.getElementById('page-to');
+  if (pFrom) pFrom.textContent = from;
+  if (pTo)   pTo.textContent   = to;
+}
+</script>
 
 {% endblock %}

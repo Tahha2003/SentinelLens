@@ -1,108 +1,221 @@
 {% extends "base.html" %}
-{% block title %}Incident {{ incident.incident_id[:8] }}... — SentinelLens{% endblock %}
+{% block title %}Incident {{ incident.incident_id[:8] }}… — SentinelLens{% endblock %}
 
 {% block content %}
 
-<div style="margin-bottom:16px;">
-  <a href="/dashboard" style="color:var(--muted);font-size:13px;">← Back to Dashboard</a>
+{# ── Back button ─────────────────────────────────────────────────────────── #}
+<div class="animate-in" style="margin-bottom:18px;">
+  <a href="/dashboard" style="display:inline-flex;align-items:center;gap:6px;color:var(--text-muted);font-size:13px;transition:color 0.15s;"
+     onmouseenter="this.querySelector('.back-arrow').style.transform='translateX(-3px)'"
+     onmouseleave="this.querySelector('.back-arrow').style.transform=''">
+    <span class="back-arrow" style="display:inline-block;transition:transform 0.15s;">←</span>
+    Back to Dashboard
+  </a>
 </div>
 
-<!-- Header -->
-<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-  <div>
-    <h1>
-      Incident
-      <span class="badge badge-{{ incident.confidence_band|lower }}" style="font-size:14px;margin-left:8px;">{{ incident.confidence_band }}</span>
-      {% if incident.is_truncated %}<span class="truncated-badge">TRUNCATED</span>{% endif %}
-    </h1>
-    <p style="font-family:monospace;font-size:12px;margin-top:4px;">{{ incident.incident_id }}</p>
+{# ── Header ──────────────────────────────────────────────────────────────── #}
+<div class="page-header animate-in" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;">
+  <div style="flex:1;min-width:0;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+      <h1 style="font-size:20px;">Incident</h1>
+      <span class="badge badge-{{ incident.confidence_band|lower }}" style="font-size:13px;padding:4px 12px;">
+        {{ incident.confidence_band }}
+      </span>
+      {% if incident.is_truncated %}
+        <span class="truncated-badge">TRUNCATED</span>
+      {% endif %}
+    </div>
+    <div class="mono" style="font-size:12px;color:var(--text-muted);letter-spacing:0.5px;word-break:break-all;">
+      {{ incident.incident_id }}
+    </div>
   </div>
-  <div style="text-align:right;">
-    <div style="font-size:32px;font-weight:700;color:{% if incident.confidence_band == 'HIGH' %}var(--high){% elif incident.confidence_band == 'MEDIUM' %}var(--medium){% else %}var(--low){% endif %};">
+
+  <div style="text-align:right;flex-shrink:0;">
+    <div id="score-display" style="font-size:38px;font-weight:800;letter-spacing:-2px;line-height:1;
+      color:{% if incident.confidence_band == 'HIGH' %}var(--high){% elif incident.confidence_band == 'MEDIUM' %}var(--medium){% else %}var(--low){% endif %};
+      text-shadow:0 0 24px {% if incident.confidence_band == 'HIGH' %}var(--high-glow){% elif incident.confidence_band == 'MEDIUM' %}var(--medium-glow){% else %}var(--low-glow){% endif %};">
       {{ "%.3f"|format(incident.score) }}
     </div>
-    <div style="font-size:11px;color:var(--muted);">MODEL SCORE</div>
+    <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-top:4px;">
+      Model Score
+    </div>
   </div>
 </div>
 
-<!-- Stats row -->
-<div class="stat-grid">
-  <div class="stat-card">
+{# ── Stat cards row ──────────────────────────────────────────────────────── #}
+<div class="stat-grid stagger" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+
+  <div class="stat-card animate-in" style="border-color:var(--info-border);">
+    <span class="stat-icon">📊</span>
     <div class="stat-label">Events</div>
-    <div class="stat-value">{{ events|length }}</div>
+    <div class="stat-value" id="cnt-events" style="color:var(--accent);">{{ events|length }}</div>
   </div>
-  <div class="stat-card">
+
+  <div class="stat-card animate-in" style="border-color:var(--info-border);">
+    <span class="stat-icon">🔗</span>
     <div class="stat-label">Entities</div>
-    <div class="stat-value">{{ incident.entities|length if incident.entities else 0 }}</div>
+    <div class="stat-value" id="cnt-entities" style="color:var(--accent);">{{ incident.entities|length if incident.entities else 0 }}</div>
   </div>
-  <div class="stat-card">
+
+  <div class="stat-card animate-in"
+    style="border-color:{% if incident.features and incident.features.severity_max >= 4 %}var(--high-border){% elif incident.features and incident.features.severity_max == 3 %}var(--medium-border){% else %}var(--low-border){% endif %}">
+    <span class="stat-icon">⚠️</span>
     <div class="stat-label">Severity Max</div>
-    <div class="stat-value" style="color:{% if incident.features.severity_max == 5 %}var(--high){% elif incident.features.severity_max >= 3 %}var(--medium){% else %}var(--low){% endif %};">
+    <div class="stat-value" id="cnt-sev"
+      style="color:{% if incident.features and incident.features.severity_max >= 4 %}var(--high){% elif incident.features and incident.features.severity_max == 3 %}var(--medium){% else %}var(--low){% endif %}">
       {{ incident.features.severity_max if incident.features else '—' }}
     </div>
   </div>
-  <div class="stat-card">
+
+  <div class="stat-card animate-in" style="border-color:var(--border);">
+    <span class="stat-icon">⏱️</span>
     <div class="stat-label">Duration</div>
-    <div class="stat-value" style="font-size:18px;">
+    <div class="stat-value" style="font-size:20px;color:var(--text);">
       {% if incident.features %}
         {% set m = incident.features.time_span_minutes %}
-        {% if m < 1 %}{{ (m * 60)|int }}s{% else %}{{ m|int }}m{% endif %}
+        {% if m < 1 %}{{ (m * 60)|int }}s
+        {% elif m < 60 %}{{ m|int }}m
+        {% else %}{{ (m / 60)|int }}h {{ (m % 60)|int }}m{% endif %}
       {% else %}—{% endif %}
     </div>
   </div>
+
 </div>
 
-<!-- Two-column layout -->
-<div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start;">
+{# ── Two-column layout ───────────────────────────────────────────────────── #}
+<div id="detail-layout" style="display:grid;grid-template-columns:1fr 360px;gap:18px;align-items:start;">
 
-  <!-- Left: timeline -->
-  <div>
+  {# ── Left: Event Timeline ──────────────────────────────────────────────── #}
+  <div class="animate-in">
     <div class="card">
       <div class="card-header">
-        Event Timeline
-        <span style="font-size:12px;color:var(--muted);font-weight:400;">{{ events|length }} events · {{ incident.time_start[:19] if incident.time_start else '' }} → {{ incident.time_end[:19] if incident.time_end else '' }}</span>
+        <span><span class="card-header-icon">📅</span>Event Timeline</span>
+        <span style="font-size:12px;color:var(--text-muted);font-weight:400;">
+          {{ events|length }} events
+          {% if incident.time_start %} · {{ incident.time_start[:19] }} → {{ incident.time_end[:19] if incident.time_end else '?' }}{% endif %}
+        </span>
       </div>
-      <div class="card-body">
+      <div class="card-body" style="padding:18px;">
         {% if events %}
-        <div class="timeline">
-          {% for ev in events %}
-          <div class="timeline-item">
-            <div class="timeline-dot" style="background:{% if ev.severity == 5 %}var(--high){% elif ev.severity == 4 %}var(--high){% elif ev.severity == 3 %}var(--medium){% else %}var(--low){% endif %};"></div>
-            <div class="timeline-content">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                <span style="font-weight:600;font-size:13px;">{{ ev.event_type }}</span>
-                <span class="timeline-time">{{ ev.timestamp[:19] if ev.timestamp else '' }}</span>
+        <div style="max-height:560px;overflow-y:auto;padding-right:6px;">
+          <div class="timeline" id="timeline-container">
+            {% for ev in events[:50] %}
+            <div class="timeline-item animate-in" style="animation-delay:{{ loop.index0 * 0.04 }}s">
+              <div class="timeline-dot"
+                style="background:{% if ev.severity >= 5 %}var(--high){% elif ev.severity == 4 %}var(--high){% elif ev.severity == 3 %}var(--medium){% else %}var(--low){% endif %};
+                       color:{% if ev.severity >= 4 %}var(--high-glow){% elif ev.severity == 3 %}var(--medium-glow){% else %}var(--low-glow){% endif %};">
               </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <span class="badge badge-{{ 'high' if ev.severity >= 4 else ('medium' if ev.severity == 3 else 'low') }}">sev {{ ev.severity }}</span>
-                <span class="badge badge-info">{{ ev.entity_id }}</span>
-                <span style="font-size:11px;color:var(--muted);">{{ ev.source }}</span>
+              <div class="timeline-content">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
+                  <span style="font-weight:600;font-size:13px;">{{ ev.event_type }}</span>
+                  <span class="timeline-time mono">{{ ev.timestamp[:19] if ev.timestamp else '' }}</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  <span class="badge badge-{{ 'high' if ev.severity >= 4 else ('medium' if ev.severity == 3 else 'low') }}" style="font-size:10px;">
+                    sev {{ ev.severity }}
+                  </span>
+                  <span class="badge badge-info" style="font-size:10px;">
+                    {% if '.' in (ev.entity_id or '') or ':' in (ev.entity_id or '') %}🌐
+                    {% elif (ev.entity_id or '').lower().startswith('user') %}👤
+                    {% else %}🖥️{% endif %}
+                    {{ ev.entity_id }}
+                  </span>
+                  {% if ev.source %}
+                  <span class="badge badge-muted" style="font-size:10px;">{{ ev.source }}</span>
+                  {% endif %}
+                  {% if ev.tags %}
+                    {% for tag in ev.tags[:3] %}
+                    <span class="badge badge-muted" style="font-size:10px;">{{ tag }}</span>
+                    {% endfor %}
+                  {% endif %}
+                </div>
               </div>
             </div>
+            {% endfor %}
           </div>
-          {% endfor %}
+
+          {# Load more if more than 50 events #}
+          {% if events|length > 50 %}
+          <div id="load-more-container" style="text-align:center;padding:12px 0;">
+            <button class="btn" id="load-more-btn" onclick="loadMoreEvents()">
+              Load {{ events|length - 50 }} more events
+            </button>
+          </div>
+          <!-- Hidden remaining events -->
+          <template id="extra-events">
+            {% for ev in events[50:] %}
+            <div class="timeline-item animate-in">
+              <div class="timeline-dot"
+                style="background:{% if ev.severity >= 5 %}var(--high){% elif ev.severity == 4 %}var(--high){% elif ev.severity == 3 %}var(--medium){% else %}var(--low){% endif %};
+                       color:{% if ev.severity >= 4 %}var(--high-glow){% elif ev.severity == 3 %}var(--medium-glow){% else %}var(--low-glow){% endif %};">
+              </div>
+              <div class="timeline-content">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
+                  <span style="font-weight:600;font-size:13px;">{{ ev.event_type }}</span>
+                  <span class="timeline-time mono">{{ ev.timestamp[:19] if ev.timestamp else '' }}</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  <span class="badge badge-{{ 'high' if ev.severity >= 4 else ('medium' if ev.severity == 3 else 'low') }}" style="font-size:10px;">
+                    sev {{ ev.severity }}
+                  </span>
+                  <span class="badge badge-info" style="font-size:10px;">
+                    {% if '.' in (ev.entity_id or '') or ':' in (ev.entity_id or '') %}🌐
+                    {% elif (ev.entity_id or '').lower().startswith('user') %}👤
+                    {% else %}🖥️{% endif %}
+                    {{ ev.entity_id }}
+                  </span>
+                  {% if ev.source %}
+                  <span class="badge badge-muted" style="font-size:10px;">{{ ev.source }}</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </template>
+          {% endif %}
         </div>
         {% else %}
-        <p style="color:var(--muted);text-align:center;padding:24px;">No events found for this incident.</p>
+        <div style="text-align:center;padding:40px;color:var(--text-muted);">
+          <div style="font-size:32px;margin-bottom:10px;">📭</div>
+          <p>No events found for this incident.</p>
+        </div>
         {% endif %}
       </div>
     </div>
   </div>
 
-  <!-- Right: features + entities + investigation -->
+  {# ── Right: Side Panel ──────────────────────────────────────────────────── #}
   <div style="display:flex;flex-direction:column;gap:16px;">
 
-    <!-- Features -->
+    {# Feature Vector #}
     {% if incident.features %}
-    <div class="card">
-      <div class="card-header">Feature Vector</div>
+    <div class="card animate-in" style="animation-delay:0.1s">
+      <div class="card-header">
+        <span><span class="card-header-icon">🧮</span>Feature Vector</span>
+      </div>
       <div class="card-body" style="padding:0;">
-        <table>
+        <table style="width:100%;">
           {% for key, val in incident.features.items() %}
           <tr>
-            <td style="color:var(--muted);font-size:12px;font-family:monospace;">{{ key }}</td>
-            <td style="font-variant-numeric:tabular-nums;font-size:13px;text-align:right;">
-              {% if val is none %}—{% elif val is float %}{{ "%.3f"|format(val) }}{% else %}{{ val }}{% endif %}
+            <td style="color:var(--text-muted);font-size:11px;font-family:monospace;padding:8px 14px;white-space:nowrap;">{{ key }}</td>
+            <td style="padding:8px 14px;">
+              {% if val is none %}
+                <span style="color:var(--text-muted);">—</span>
+              {% elif val is float or val is integer %}
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="flex:1;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;max-width:80px;overflow:hidden;">
+                    {% set raw_pct = (val * 100)|int %}
+                    {% set pct = raw_pct if raw_pct <= 100 else 100 %}
+                    {% set pct = pct if pct >= 0 else 0 %}
+                    <div style="width:{{ pct }}%;height:100%;background:var(--accent);border-radius:2px;transition:width 1s ease;"></div>
+                  </div>
+                  <span style="font-size:12px;font-variant-numeric:tabular-nums;color:var(--text);">
+                    {% if val is float %}{{ "%.3f"|format(val) }}{% else %}{{ val }}{% endif %}
+                  </span>
+                </div>
+              {% else %}
+                <span style="font-size:12px;color:var(--text);">{{ val }}</span>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -111,110 +224,230 @@
     </div>
     {% endif %}
 
-    <!-- Entities -->
+    {# Entities Panel #}
     {% if incident.entities %}
-    <div class="card">
-      <div class="card-header">Entities ({{ incident.entities|length }})</div>
-      <div class="card-body" style="display:flex;flex-wrap:wrap;gap:6px;">
+    <div class="card animate-in" style="animation-delay:0.15s">
+      <div class="card-header">
+        <span><span class="card-header-icon">🔗</span>Entities</span>
+        <span style="font-size:12px;color:var(--text-muted);font-weight:400;">{{ incident.entities|length }}</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-wrap:wrap;gap:7px;">
         {% for entity in incident.entities %}
-        <span class="badge badge-info">{{ entity }}</span>
+        <span class="badge badge-info" style="font-size:11px;padding:4px 10px;">
+          {% if '.' in entity and entity.replace('.','').isdigit() or ':' in entity %}🌐
+          {% elif entity.lower().startswith('user') or entity.lower().startswith('usr') %}👤
+          {% else %}🖥️{% endif %}
+          {{ entity }}
+        </span>
         {% endfor %}
       </div>
     </div>
     {% endif %}
 
-    <!-- Investigation Panel -->
-    <div class="card">
-      <div class="card-header">🤖 Investigate</div>
+    {# ── Investigation / Chat Panel ───────────────────────────────────────── #}
+    <div class="card animate-in" style="animation-delay:0.2s">
+      <div class="card-header">
+        <span><span class="card-header-icon">🤖</span>Investigate</span>
+        <span id="agent-backend-badge" style="font-size:10px;color:var(--text-muted);font-weight:400;"></span>
+      </div>
       <div class="card-body">
         <div class="chat-panel">
-          <div id="chat-messages" style="display:flex;flex-direction:column;gap:8px;min-height:40px;"></div>
-          <div class="chat-input-row">
-            <input type="text" id="query-input" placeholder="Ask about this incident…" />
-            <button class="btn btn-primary" onclick="submitQuery()">Ask</button>
+
+          <!-- Example query chips -->
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+            <button class="btn" style="font-size:11px;padding:3px 10px;border-radius:20px;" onclick="fillQuery('What else did this user do?')">What else did this user do?</button>
+            <button class="btn" style="font-size:11px;padding:3px 10px;border-radius:20px;" onclick="fillQuery('Show failed logins')">Show failed logins</button>
+            <button class="btn" style="font-size:11px;padding:3px 10px;border-radius:20px;" onclick="fillQuery('Explain this incident')">Explain this incident</button>
           </div>
-          <p style="font-size:11px;color:var(--muted);">Examples: "What else did this user do?" · "Show failed logins" · "Explain this incident"</p>
+
+          <!-- Messages -->
+          <div class="chat-messages" id="chat-messages"></div>
+
+          <!-- Input row -->
+          <div class="chat-input-row">
+            <input type="text" id="query-input" class="chat-input"
+                   placeholder="Ask about this incident…" />
+            <button class="btn btn-primary" id="send-btn"
+                    onclick="submitQuery()"
+                    style="padding:9px 14px;font-size:16px;flex-shrink:0;"
+                    title="Send">
+              ✈
+            </button>
+          </div>
+
+          <p style="font-size:11px;color:var(--text-muted);">
+            Results may include SPL queries you can run in Splunk.
+          </p>
         </div>
       </div>
     </div>
 
-  </div>
-</div>
+  </div><!-- end right panel -->
+</div><!-- end grid -->
+
+{# ── Responsive tweak for narrow screens ───────────────────────────────── #}
+<style>
+  @media (max-width: 900px) {
+    #detail-layout { grid-template-columns: 1fr !important; }
+  }
+  @media (max-width: 600px) {
+    .stat-grid { grid-template-columns: repeat(2,1fr) !important; }
+  }
+</style>
 
 <script>
-const INCIDENT_ID = "{{ incident.incident_id }}";
-const AUTH = "Basic " + btoa("{{ dashboard_user }}:{{ dashboard_password }}");
+// ── Constants ─────────────────────────────────────────────────────────────
+const INCIDENT_ID = {{ incident.incident_id | tojson }};
+const AUTH        = "Basic " + btoa({{ dashboard_user | tojson }} + ":" + {{ dashboard_password | tojson }});
 
+// ── Animate score counter on load ─────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  const scoreEl = document.getElementById('score-display');
+  const targetScore = {{ incident.score }};
+  if (scoreEl) animateCounter(scoreEl, targetScore, 1000, 3);
+
+  // Animate integer stats
+  [
+    ['cnt-events',   {{ events|length }}],
+    ['cnt-entities', {{ incident.entities|length if incident.entities else 0 }}],
+    {% if incident.features and incident.features.severity_max is not none %}
+    ['cnt-sev',      {{ incident.features.severity_max }}],
+    {% endif %}
+  ].forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el && !isNaN(val)) animateCounter(el, val, 700);
+  });
+});
+
+// ── Load more events ──────────────────────────────────────────────────────
+function loadMoreEvents() {
+  const tmpl = document.getElementById('extra-events');
+  const container = document.getElementById('timeline-container');
+  if (!tmpl || !container) return;
+  const frag = tmpl.content.cloneNode(true);
+  container.appendChild(frag);
+  document.getElementById('load-more-container').remove();
+}
+
+// ── Fill query chip ───────────────────────────────────────────────────────
+function fillQuery(q) {
+  const input = document.getElementById('query-input');
+  input.value = q;
+  input.focus();
+}
+
+// ── Chat submit ───────────────────────────────────────────────────────────
 function submitQuery() {
-  const input = document.getElementById("query-input");
+  const input = document.getElementById('query-input');
   const query = input.value.trim();
   if (!query) return;
-  input.value = "";
+  input.value = '';
 
-  const messages = document.getElementById("chat-messages");
+  const messages = document.getElementById('chat-messages');
 
-  // User message
-  const userMsg = document.createElement("div");
-  userMsg.className = "chat-message";
-  userMsg.innerHTML = `<div class="label">You</div>${escHtml(query)}`;
-  messages.appendChild(userMsg);
+  // User bubble
+  appendBubble(messages, 'user', query);
 
-  // Thinking
-  const thinkMsg = document.createElement("div");
-  thinkMsg.className = "chat-message";
-  thinkMsg.id = "thinking";
-  thinkMsg.innerHTML = `<div class="label">Agent</div><span style="color:var(--muted)">Thinking…</span>`;
-  messages.appendChild(thinkMsg);
+  // Agent typing indicator
+  const thinkId  = 'thinking-' + Date.now();
+  const thinkEl  = document.createElement('div');
+  thinkEl.id     = thinkId;
+  thinkEl.className = 'chat-bubble chat-bubble-agent';
+  thinkEl.innerHTML = `
+    <div class="label">Agent</div>
+    <div class="typing-indicator"><span></span><span></span><span></span></div>`;
+  messages.appendChild(thinkEl);
   messages.scrollTop = messages.scrollHeight;
 
-  fetch("/api/v1/investigate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": AUTH },
+  // Disable send button
+  const sendBtn = document.getElementById('send-btn');
+  sendBtn.disabled = true;
+
+  fetch('/api/v1/investigate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': AUTH },
     body: JSON.stringify({ incident_id: INCIDENT_ID, query: query })
   })
   .then(r => r.json())
   .then(data => {
     const sessionId = data.session_id;
-    if (!sessionId) throw new Error(data.error || "No session ID returned");
-    pollResult(sessionId);
+    if (!sessionId) throw new Error(data.error || 'No session ID returned');
+    pollResult(sessionId, thinkId, messages, sendBtn);
   })
   .catch(err => {
-    document.getElementById("thinking").innerHTML =
-      `<div class="label" style="color:var(--high)">Error</div>${escHtml(String(err))}`;
+    const el = document.getElementById(thinkId);
+    if (el) {
+      el.innerHTML = `<div class="label" style="color:var(--high)">Error</div>${escHtml(String(err))}`;
+    }
+    sendBtn.disabled = false;
   });
 }
 
-function pollResult(sessionId, attempts=0) {
-  if (attempts > 30) {
-    document.getElementById("thinking").innerHTML =
-      `<div class="label" style="color:var(--high)">Timeout</div>Investigation timed out.`;
+function pollResult(sessionId, thinkId, messages, sendBtn, attempts) {
+  attempts = attempts || 0;
+  if (attempts > 60) {
+    const el = document.getElementById(thinkId);
+    if (el) el.innerHTML = `<div class="label" style="color:var(--high)">Timeout</div>Investigation timed out.`;
+    sendBtn.disabled = false;
     return;
   }
-  fetch(`/api/v1/investigate/${sessionId}`, { headers: { "Authorization": AUTH } })
+
+  fetch('/api/v1/investigate/' + sessionId, { headers: { 'Authorization': AUTH } })
   .then(r => r.json())
   .then(data => {
-    if (data.status === "complete" || data.status === "failed") {
-      const el = document.getElementById("thinking");
-      el.id = "";
-      let html = `<div class="label">Agent <span style="font-size:10px;color:var(--muted);">(${data.agent_backend || ""})</span></div>`;
-      html += `<div style="white-space:pre-wrap;">${escHtml(data.result_summary || data.error_message || "No response")}</div>`;
-      if (data.spl_generated) {
-        html += `<div class="chat-spl">${escHtml(data.spl_generated)}</div>`;
+    if (data.status === 'complete' || data.status === 'failed') {
+      const el = document.getElementById(thinkId);
+      if (el) {
+        el.id = '';  // unset thinking id
+
+        // Show agent backend badge
+        if (data.agent_backend) {
+          const badge = document.getElementById('agent-backend-badge');
+          if (badge) badge.textContent = data.agent_backend;
+        }
+
+        let html = `<div class="label">Agent`;
+        if (data.agent_backend) {
+          html += ` <span style="background:rgba(99,120,200,0.12);color:var(--text-muted);padding:1px 6px;border-radius:10px;font-size:10px;margin-left:4px;">${escHtml(data.agent_backend)}</span>`;
+        }
+        html += `</div>`;
+        html += `<div style="white-space:pre-wrap;line-height:1.6;">${escHtml(data.result_summary || data.error_message || 'No response')}</div>`;
+        if (data.spl_generated) {
+          html += `<div class="chat-spl">${escHtml(data.spl_generated)}</div>`;
+        }
+        el.innerHTML = html;
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
-      el.innerHTML = html;
-      el.scrollIntoView({ behavior: "smooth" });
+      sendBtn.disabled = false;
     } else {
-      setTimeout(() => pollResult(sessionId, attempts + 1), 1000);
+      setTimeout(() => pollResult(sessionId, thinkId, messages, sendBtn, attempts + 1), 1000);
     }
+  })
+  .catch(() => {
+    setTimeout(() => pollResult(sessionId, thinkId, messages, sendBtn, attempts + 1), 1500);
   });
+}
+
+function appendBubble(container, role, text) {
+  const el       = document.createElement('div');
+  el.className   = 'chat-bubble ' + (role === 'user' ? 'chat-bubble-user' : 'chat-bubble-agent');
+  el.innerHTML   = `<div class="label">${role === 'user' ? 'You' : 'Agent'}</div>${escHtml(text)}`;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
-document.getElementById("query-input").addEventListener("keydown", e => {
-  if (e.key === "Enter") submitQuery();
+// Enter key to send
+document.getElementById('query-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) submitQuery();
 });
 </script>
+
 {% endblock %}
