@@ -81,10 +81,7 @@ class PipelineRunner:
         try:
             # ── Step 1: Fetch raw events ───────────────────────────────────────
             datasource = get_datasource()
-            end_time = datetime.now(tz=timezone.utc)
-            # For local mode: fetch all events (start_time=epoch)
-            start_time = datetime(2000, 1, 1, tzinfo=timezone.utc)
-            raw_events = datasource.get_events("", start_time, end_time)
+            raw_events = datasource.get_events("", None, None)
             event_count = len(raw_events)
             logger.info("[%s] Fetched %d raw events", run_id[:8], event_count)
 
