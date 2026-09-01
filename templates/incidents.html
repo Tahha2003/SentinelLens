@@ -48,6 +48,8 @@
       hx-post="/api/v1/pipeline/run"
       hx-target="#pipeline-status"
       hx-swap="innerHTML"
+      hx-on:click="this.disabled=true; this.textContent='Running…'"
+      hx-on:htmx:after-request="setTimeout(()=>{this.disabled=false;this.textContent='▶ Run Pipeline';location.reload()}, 120000)"
       hx-headers='{"Authorization": "Basic {{ (dashboard_user + ":" + dashboard_password) | b64encode }}"}'>
       ▶ Run Pipeline
     </button>

@@ -20,6 +20,11 @@ def run_pipeline():
     repo = Repository()
     runner = PipelineRunner(repo)
     run_id = runner.run_async()
+
+    # Return HTMX-friendly HTML snippet instead of raw JSON
+    from flask import request as freq
+    if "HX-Request" in freq.headers:
+        return f'<span style="color:var(--medium)">⏳ Pipeline running… (~2 min) &nbsp;<code style="font-size:11px">{run_id[:8]}</code></span>', 202
     return jsonify({"run_id": run_id, "status": "queued"}), 202
 
 
