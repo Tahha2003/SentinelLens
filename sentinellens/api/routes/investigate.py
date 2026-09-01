@@ -122,13 +122,43 @@ def _load_incident(repo, incident_id):
 
 def _generate_mock_spl(query: str, incident_id: str) -> str:
     q_lower = query.lower()
+    repo = Repository()
+    incident = repo.get_incident_by_id(incident_id)
+    import json
+    entities = []
+    if incident:
+        ents = incident.get("entities", "[]")
+        if isinstance(ents, str):
+            ents = json.loads(ents)
+        entities = ents[:3]
+    time_start = incident.get("time_start", "0") if incident else "0"
+    time_end = incident.get("time_end", "now") if incident else "now"
+
+    # Build entity filter
+    entity_filter = ""
+    if entities:
+        hosts = [e.replace("host:", "") for e in entities if e.startswith("host:")]
+        ips = [e.replace("ip:", "") for e in entities if e.startswith("ip:")]
+        users = [e.replace("user:", "") for e in entities if e.startswith("user:")]
+        if hosts:
+            entity_filter = f'host="{hosts[0]}"'
+        elif ips:
+            entity_filter = f'(src_ip="{ips[0]}" OR dest_ip="{ips[0]}")'
+        elif users:
+            entity_filter = f'user="{users[0]}"'
+
     if "failed" in q_lower or "brute" in q_lower or "login" in q_lower:
-        return 'index=* sourcetype=wineventlog EventCode=4625 | stats count by src_ip, user | sort -count'
+        return f'index=botsv3 {entity_filter} sourcetype=wineventlog EventCode=4625 earliest="{time_start}" latest="{time_end}" | stats count by src_ip, user | sort -count'
     if "dns" in q_lower:
-        return 'index=* sourcetype="stream:dns" | eval len=len(query) | where len > 40 | table _time, src_ip, query'
-    if "network" in q_lower or "connection" in q_lower:
-        return 'index=* sourcetype="stream:*" | stats sum(bytes_out) as total_out by src_ip, dest_ip | sort -total_out'
-    return f'index=* | search "{query[:50]}" | head 100'
+        return f'index=botsv3 {entity_filter} sourcetype="stream:dns" earliest="{time_start}" latest="{time_end}" | eval len=len(query) | where len > 40 | table _time, src_ip, query'
+    if "network" in q_lower or "connection" in q_lower or "traffic" in q_lower:
+        return f'index=botsv3 {entity_filter} earliest="{time_start}" latest="{time_end}" | stats count by sourcetype, src_ip, dest_ip | sort -count'
+    if "malware" in q_lower or "virus" in q_lower or "threat" in q_lower:
+        return f'index=botsv3 {entity_filter} sourcetype="symantec:ep:risk:file" earliest="{time_start}" latest="{time_end}" | table _time, host, threat_name, file_path, action_taken'
+    if "user" in q_lower or "account" in q_lower:
+        return f'index=botsv3 {entity_filter} sourcetype=wineventlog earliest="{time_start}" latest="{time_end}" | stats count by user, EventCode | sort -count'
+    # Default: all activity for this entity
+    return f'index=botsv3 {entity_filter} earliest="{time_start}" latest="{time_end}" | stats count by sourcetype | sort -count'
 
 
 def _generate_mock_summary(query: str, incident_id: str, repo) -> str:
