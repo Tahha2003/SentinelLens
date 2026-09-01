@@ -18,6 +18,12 @@ def create_app() -> Flask:
     )
     app.secret_key = config.FLASK_SECRET_KEY
 
+    # ── Custom Jinja2 filters ──────────────────────────────────────────────────
+    import base64 as _b64
+    @app.template_filter("b64encode")
+    def b64encode_filter(s: str) -> str:
+        return _b64.b64encode(s.encode()).decode()
+
     # ── Register API blueprints ────────────────────────────────────────────────
     from sentinellens.api.routes.health     import health_bp
     from sentinellens.api.routes.incidents  import incidents_bp
@@ -60,6 +66,8 @@ def create_app() -> Flask:
             total=total,
             datasource_mode=ds.source_name(),
             recent_runs=recent_runs,
+            dashboard_user=config.DASHBOARD_USER,
+            dashboard_password=config.DASHBOARD_PASSWORD,
         )
 
     @app.route("/incidents/<incident_id>")

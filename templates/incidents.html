@@ -48,7 +48,7 @@
       hx-post="/api/v1/pipeline/run"
       hx-target="#pipeline-status"
       hx-swap="innerHTML"
-      hx-headers='{"Authorization": "Basic YWRtaW46Y2hhbmdlbWU="}'>
+      hx-headers='{"Authorization": "Basic {{ (dashboard_user + ":" + dashboard_password) | b64encode }}"}'>
       ▶ Run Pipeline
     </button>
     <div id="pipeline-status" style="font-size:13px;color:var(--muted);">
